@@ -1,8 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useRef, useEffect } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState, useEffect } from "react";
 import { ArrowLeft, Upload, Search, Camera } from "lucide-react";
 import utkarshLogoFont from "@/assets/utkarsh-logo-font.jpg";
-import { getGallery, createEntry } from "@/lib/server-fns";
+import { getGallery } from "@/lib/server-fns";
 import { localStore } from "@/lib/local-store";
 
 export const Route = createFileRoute("/gallery")({
@@ -16,9 +16,9 @@ export const Route = createFileRoute("/gallery")({
 });
 
 function GalleryPage() {
+  const navigate = useNavigate();
   const [photos, setPhotos] = useState<any[]>([]);
   const [search, setSearch] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const loadPhotos = async () => {
     const res = await getGallery({ data: { page: 1, perPage: 100 } });
@@ -41,28 +41,13 @@ function GalleryPage() {
     loadPhotos();
   }, []);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      const photoUrl = evt.target?.result as string;
-      const ticketNum = localStore.getNextTicketNumber();
-
-      await createEntry({
-        data: {
-          student_id: `guest_${Date.now()}`,
-          ticket_number: ticketNum,
-          photo_path: photoUrl,
-          display_name: "You",
-          college_name: "Fest Participant",
-        },
-      });
-
-      loadPhotos();
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
+  const handleUploadClick = () => {
+    const studentId = typeof window !== "undefined" ? sessionStorage.getItem("studentId") : null;
+    if (!studentId) {
+      navigate({ to: "/register" });
+    } else {
+      navigate({ to: "/upload-photo" });
+    }
   };
 
   const filtered = photos.filter(
@@ -72,7 +57,7 @@ function GalleryPage() {
   );
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
       {/* ── Header ── */}
       <header className="sticky top-0 z-30 border-b border-border/50 bg-background/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-[1240px] items-center gap-4 px-5 py-3">
@@ -96,7 +81,7 @@ function GalleryPage() {
           </div>
 
           <button
-            onClick={() => fileRef.current?.click()}
+            onClick={handleUploadClick}
             className="hidden sm:inline-flex shrink-0 items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold btn-neon"
           >
             <Upload className="h-4 w-4 icon-glow-pink" />
@@ -111,15 +96,6 @@ function GalleryPage() {
           </Link>
         </div>
       </header>
-
-      {/* Hidden file input */}
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleUpload}
-      />
 
       {/* ── Hero strip ── */}
       <div className="relative overflow-hidden border-b border-border/30 bg-background px-5 py-10 text-center">
@@ -180,7 +156,7 @@ function GalleryPage() {
             <p className="mt-1 text-sm text-muted-foreground">One photo per person. Make it your best shot.</p>
           </div>
           <button
-            onClick={() => fileRef.current?.click()}
+            onClick={handleUploadClick}
             className="inline-flex items-center gap-2 rounded-full px-8 py-3.5 text-sm font-semibold btn-neon"
           >
             <Upload className="h-4 w-4 icon-glow-pink" />

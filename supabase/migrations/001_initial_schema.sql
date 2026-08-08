@@ -1,5 +1,5 @@
 -- =====================================================
--- UTKARSH 2026 PHOTO BOOTH CONTEST — DATABASE SCHEMA
+-- UTKARSH 2026 PHOTO BOOTH CONTEST — COMPLETE DATABASE SCHEMA & STORAGE POLICIES
 -- Run this entire script in Supabase Dashboard:
 --   SQL Editor → New query → Paste → Run
 -- =====================================================
@@ -38,9 +38,9 @@ CREATE TABLE IF NOT EXISTS entries (
   photo_path     TEXT NOT NULL,
   thumbnail_path TEXT,
   submitted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  status         TEXT NOT NULL DEFAULT 'pending'
+  status         TEXT NOT NULL DEFAULT 'valid'
                    CHECK (status IN ('pending', 'valid', 'rejected')),
-  is_valid       BOOLEAN NOT NULL DEFAULT FALSE,
+  is_valid       BOOLEAN NOT NULL DEFAULT TRUE,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
   -- One entry per student
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- =====================================================
--- SEQUENCE: ticket counter (atomic, no duplicates)
+-- SEQUENCE: ticket counter (atomic, sequential, no duplicates)
 -- =====================================================
 CREATE SEQUENCE IF NOT EXISTS ticket_seq START 1;
 
@@ -94,6 +94,7 @@ CREATE SEQUENCE IF NOT EXISTS ticket_seq START 1;
 CREATE OR REPLACE FUNCTION generate_ticket_number()
 RETURNS TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
   next_val BIGINT;
@@ -103,9 +104,12 @@ BEGIN
 END;
 $$;
 
+-- Grant execute permission to anon and authenticated users
+GRANT EXECUTE ON FUNCTION generate_ticket_number() TO anon, authenticated, service_role;
+
 -- =====================================================
 -- FUNCTION: execute_lucky_draw(p_admin_id UUID)
--- Selects one random valid entry as winner.
+-- Selects one random valid entry as winner (ORDER BY random() LIMIT 1).
 -- Idempotent check: prevents running twice.
 -- Returns: winner entry info as JSON
 -- =====================================================
@@ -115,11 +119,11 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 DECLARE
-  v_winner_entry  entries%ROWTYPE;
+  v_winner_entry   entries%ROWTYPE;
   v_winner_student students%ROWTYPE;
-  v_draw_id       UUID;
-  v_total         INTEGER;
-  v_result        JSONB;
+  v_draw_id        UUID;
+  v_total          INTEGER;
+  v_result         JSONB;
 BEGIN
   -- 1. Prevent running twice
   IF EXISTS (SELECT 1 FROM winners LIMIT 1) THEN
@@ -166,7 +170,7 @@ BEGIN
     )
   );
 
-  -- 8. Return sanitized winner info (no PII)
+  -- 8. Return winner info
   v_result := jsonb_build_object(
     'ticket_number', v_winner_entry.ticket_number,
     'display_name',  v_winner_student.full_name,
@@ -180,8 +184,11 @@ BEGIN
 END;
 $$;
 
+-- Grant execute permission
+GRANT EXECUTE ON FUNCTION execute_lucky_draw(UUID) TO authenticated, service_role;
+
 -- =====================================================
--- ROW LEVEL SECURITY
+-- ROW LEVEL SECURITY (RLS) POLICIES
 -- =====================================================
 
 ALTER TABLE students    ENABLE ROW LEVEL SECURITY;
@@ -190,37 +197,71 @@ ALTER TABLE winners     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE draws       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs  ENABLE ROW LEVEL SECURITY;
 
--- Students can only read their own row
-CREATE POLICY "Students: read own record"
-  ON students FOR SELECT
-  USING (auth.uid()::TEXT = id::TEXT);
+-- 1. Students policies
+DROP POLICY IF EXISTS "Allow student insert" ON students;
+CREATE POLICY "Allow student insert"
+  ON students FOR INSERT WITH CHECK (TRUE);
 
--- Entries: students read own entry
-CREATE POLICY "Entries: read own"
-  ON entries FOR SELECT
-  USING (
-    student_id IN (
-      SELECT id FROM students WHERE id::TEXT = auth.uid()::TEXT
-    )
-  );
+DROP POLICY IF EXISTS "Allow student select" ON students;
+CREATE POLICY "Allow student select"
+  ON students FOR SELECT USING (TRUE);
 
--- Winners: public read (sanitized by API, no PII)
+-- 2. Entries policies
+DROP POLICY IF EXISTS "Allow entry insert" ON entries;
+CREATE POLICY "Allow entry insert"
+  ON entries FOR INSERT WITH CHECK (TRUE);
+
+DROP POLICY IF EXISTS "Allow entry select" ON entries;
+CREATE POLICY "Allow entry select"
+  ON entries FOR SELECT USING (TRUE);
+
+DROP POLICY IF EXISTS "Allow entry update" ON entries;
+CREATE POLICY "Allow entry update"
+  ON entries FOR UPDATE USING (TRUE);
+
+DROP POLICY IF EXISTS "Allow entry delete" ON entries;
+CREATE POLICY "Allow entry delete"
+  ON entries FOR DELETE USING (TRUE);
+
+-- 3. Winners policies
+DROP POLICY IF EXISTS "Winners: public read" ON winners;
 CREATE POLICY "Winners: public read"
-  ON winners FOR SELECT
-  USING (TRUE);
+  ON winners FOR SELECT USING (TRUE);
 
--- Service role bypasses RLS (used in server functions only)
--- No additional policies needed for service role.
+-- 4. Draws & Audit logs
+DROP POLICY IF EXISTS "Draws read" ON draws;
+CREATE POLICY "Draws read"
+  ON draws FOR SELECT USING (TRUE);
 
 -- =====================================================
--- STORAGE BUCKETS
--- Run this separately or via Supabase dashboard Storage tab
+-- STORAGE BUCKETS & RLS POLICIES
 -- =====================================================
--- INSERT INTO storage.buckets (id, name, public)
--- VALUES ('contest-photos', 'contest-photos', false);
---
--- Note: Create this bucket manually in Supabase Dashboard:
---   Storage → New bucket → Name: contest-photos → Private (unchecked public)
+
+-- Create contest-photos bucket
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('contest-photos', 'contest-photos', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- Storage policies for contest-photos
+DROP POLICY IF EXISTS "Public select contest-photos" ON storage.objects;
+CREATE POLICY "Public select contest-photos"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'contest-photos');
+
+DROP POLICY IF EXISTS "Public insert contest-photos" ON storage.objects;
+CREATE POLICY "Public insert contest-photos"
+  ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'contest-photos');
+
+DROP POLICY IF EXISTS "Public update contest-photos" ON storage.objects;
+CREATE POLICY "Public update contest-photos"
+  ON storage.objects FOR UPDATE
+  USING (bucket_id = 'contest-photos');
+
+DROP POLICY IF EXISTS "Public delete contest-photos" ON storage.objects;
+CREATE POLICY "Public delete contest-photos"
+  ON storage.objects FOR DELETE
+  USING (bucket_id = 'contest-photos');
 
 -- =====================================================
 -- INDEXES

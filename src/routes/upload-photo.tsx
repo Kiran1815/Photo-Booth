@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useRef, useCallback } from "react";
 import { Upload, Camera, CheckCircle, AlertCircle, Loader2, ArrowLeft, Ticket } from "lucide-react";
 import utkarshLogoFont from "@/assets/utkarsh-logo-font.jpg";
+import goldenTicket from "@/assets/golden-ticket.png";
 import { supabase } from "@/lib/supabase";
 import { createEntry } from "@/lib/server-fns";
 import { localStore } from "@/lib/local-store";
@@ -10,7 +11,7 @@ export const Route = createFileRoute("/upload-photo")({
   head: () => ({
     meta: [
       { title: "Upload Photo | Utkarsh 2026 Photo Booth Contest" },
-      { name: "description", content: "Upload your contest photo and get your ticket." },
+      { name: "description", content: "Upload your contest photo and get your unique ticket number." },
     ],
   }),
   component: UploadPhotoPage,
@@ -23,40 +24,19 @@ type Step = "select" | "preview" | "uploading" | "success" | "error";
 
 function UploadPhotoPage() {
   const navigate = useNavigate();
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileRef  = useRef<HTMLInputElement>(null);
 
-  // Student ID stored in sessionStorage after registration
+  // Read student session info from registration step
   const studentId =
     typeof window !== "undefined" ? sessionStorage.getItem("studentId") ?? "" : "";
   const studentName =
     typeof window !== "undefined" ? sessionStorage.getItem("studentName") ?? "" : "";
 
-  const [step, setStep] = useState<Step>("select");
-  const [file, setFile] = useState<File | null>(null);
+  const [step, setStep]       = useState<Step>("select");
+  const [file, setFile]       = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [ticket, setTicket] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Guard: redirect to register if not registered
-  if (!studentId) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 text-center">
-        <div className="pointer-events-none absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-neon-purple/10 blur-[120px]" />
-        <div className="pointer-events-none absolute -bottom-40 -right-40 h-[500px] w-[500px] rounded-full bg-neon-pink/10 blur-[120px]" />
-        <div className="relative z-10 max-w-sm">
-          <AlertCircle className="mx-auto h-16 w-16 text-neon-pink mb-4" />
-          <h1 className="text-2xl font-black">Registration Required</h1>
-          <p className="mt-3 text-sm text-muted-foreground leading-6">
-            You need to register for the event before uploading your photo.
-          </p>
-          <Link to="/register"
-            className="mt-6 inline-flex btn-neon rounded-full px-8 py-3 text-sm font-semibold items-center gap-2">
-            Register Now →
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  const [ticket, setTicket]   = useState<string | null>(null);
+  const [error, setError]     = useState<string | null>(null);
 
   const handleFile = useCallback((f: File) => {
     setError(null);
@@ -66,7 +46,7 @@ function UploadPhotoPage() {
       return;
     }
     if (f.size > MAX_SIZE_MB * 1024 * 1024) {
-      setError(`File too large. Maximum size is ${MAX_SIZE_MB}MB.`);
+      setError(`File size exceeds limit (${MAX_SIZE_MB}MB max). Please select a smaller photo.`);
       return;
     }
 
@@ -86,7 +66,8 @@ function UploadPhotoPage() {
 
   const handleSubmit = async () => {
     if (!file || !studentId) {
-      setError("Session expired. Please register again.");
+      setError("Session expired or missing registration details. Please register again.");
+      setStep("select");
       return;
     }
 
@@ -94,47 +75,79 @@ function UploadPhotoPage() {
     setError(null);
 
     try {
-      // Read file as base64 Data URL for persistent local display & offline fallback
+      // 1. Generate unique ticket number atomically from Supabase RPC / local sequence
+      let ticketNum = "";
+      try {
+        const { data: rpcTicket } = await supabase.rpc("generate_ticket_number");
+        ticketNum = rpcTicket || "";
+      } catch (e) {
+        console.warn("RPC ticket error:", e);
+      }
+      if (!ticketNum) {
+        ticketNum = localStore.getNextTicketNumber();
+      }
+
+      // 2. Prepare file path in bucket "contest-photos"
+      const ext = file.name.split(".").pop() || "jpg";
+      const storageFilePath = `${ticketNum}.${ext}`;
+
+      // 3. Upload photo file directly to Supabase Storage bucket "contest-photos"
+      let savedPhotoPath = "";
+
+      // Convert file to base64 Data URL for local fallback or inline preview
       const photoDataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onload  = (e) => resolve(e.target?.result as string);
         reader.onerror = (e) => reject(e);
         reader.readAsDataURL(file);
       });
 
-      // 1. Generate ticket number via Supabase RPC / localStore
-      const { data: ticketNum, error: ticketErr } = await supabase
-        .rpc("generate_ticket_number");
+      const { data: storageResult, error: uploadErr } = await supabase.storage
+        .from("contest-photos")
+        .upload(storageFilePath, file, {
+          contentType: file.type,
+          upsert: true,
+        });
 
-      const finalTicket = ticketNum || localStore.getNextTicketNumber();
-
-      // 2. Upload photo to Supabase Storage if configured
-      const ext       = file.name.split(".").pop();
-      const photoPath = `2026/${finalTicket}/${Date.now()}.${ext}`;
-
-      try {
-        await supabase.storage
-          .from("contest-photos")
-          .upload(photoPath, file, { contentType: file.type, upsert: false });
-      } catch (e) {
-        console.warn("Storage upload notice:", e);
+      if (uploadErr) {
+        // If Supabase is configured and storage upload failed, fail hard and show error
+        console.error("Storage upload error:", uploadErr);
+        if (!uploadErr.message.includes("fallback")) {
+          throw new Error(`Photo upload failed: ${uploadErr.message}`);
+        }
       }
 
-      // 3. Create entry record via server function (storing base64 photo for local persistence & instant gallery rendering)
-      const json = await createEntry({
+      if (storageResult?.path) {
+        // Get public URL from Supabase Storage bucket "contest-photos"
+        const { data: pubData } = supabase.storage
+          .from("contest-photos")
+          .getPublicUrl(storageResult.path);
+        savedPhotoPath = pubData?.publicUrl || storageResult.path;
+      } else {
+        // Fallback to base64 data URL for offline local testing
+        savedPhotoPath = photoDataUrl;
+      }
+
+      // 4. Insert entry record in database ("entries" table) ONLY after successful photo upload
+      const res = await createEntry({
         data: {
           student_id:    studentId,
-          ticket_number: finalTicket,
-          photo_path:    photoDataUrl,
+          ticket_number: ticketNum,
+          photo_path:    savedPhotoPath,
           display_name:  studentName || "Participant",
         },
       });
-      if (!json.success) throw new Error(json.error ?? "Failed to save entry.");
 
-      setTicket(finalTicket);
+      if (!res.success) {
+        throw new Error(res.error ?? "Failed to save entry in database.");
+      }
+
+      // 5. Success: set verified ticket number
+      setTicket(ticketNum);
       setStep("success");
     } catch (err: any) {
-      setError(err.message ?? "Something went wrong. Please try again.");
+      console.error("Submission failure:", err);
+      setError(err.message ?? "Photo upload failed. Please try again.");
       setStep("error");
     }
   };
@@ -143,14 +156,17 @@ function UploadPhotoPage() {
   if (!studentId && typeof window !== "undefined") {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <div className="panel p-8 text-center max-w-sm w-full">
+        <div className="panel p-8 text-center max-w-sm w-full border border-neon-pink/30 shadow-[0_0_30px_rgba(236,72,153,0.2)]">
           <AlertCircle className="mx-auto h-12 w-12 text-neon-pink icon-glow-pink mb-4" />
-          <h2 className="text-lg font-bold">Session Expired</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Please register first before uploading your photo.
+          <h2 className="text-xl font-black">Registration Required</h2>
+          <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+            Please register for Utkarsh 2026 before uploading your photo entry.
           </p>
-          <Link to="/register" className="mt-6 inline-flex btn-neon rounded-full px-6 py-3 text-sm font-semibold">
-            Register Now
+          <Link
+            to="/register"
+            className="mt-6 inline-flex btn-neon rounded-full px-8 py-3 text-sm font-semibold items-center gap-2"
+          >
+            Register for Event →
           </Link>
         </div>
       </div>
@@ -158,143 +174,151 @@ function UploadPhotoPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-10 relative overflow-hidden">
-      {/* Ambient glows */}
-      <div className="pointer-events-none absolute -top-40 -left-40 h-80 w-80 rounded-full bg-neon-purple/10 blur-[100px]" />
-      <div className="pointer-events-none absolute -bottom-40 -right-40 h-80 w-80 rounded-full bg-neon-pink/10 blur-[100px]" />
+    <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center px-4 py-12 relative overflow-hidden">
+      {/* Glow backgrounds */}
+      <div className="pointer-events-none absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-neon-purple/10 blur-[120px]" />
+      <div className="pointer-events-none absolute -bottom-40 -right-40 h-[500px] w-[500px] rounded-full bg-neon-pink/10 blur-[120px]" />
 
       <div className="relative z-10 w-full max-w-lg">
-        {/* Logo */}
-        <Link to="/" className="flex flex-col items-center mb-8">
-          <img src={utkarshLogoFont} alt="Utkarsh 2026"
-            className="h-8 w-auto [filter:invert(1)_brightness(3)_contrast(500%)] mix-blend-screen" />
-          <span className="mt-1 text-[9px] tracking-[0.32em] text-neon-pink uppercase">PHOTO BOOTH CONTEST</span>
-        </Link>
+        {/* Header link */}
+        <div className="flex items-center justify-between mb-8">
+          <Link to="/" className="inline-flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <ArrowLeft className="h-4 w-4" /> Back to Home
+          </Link>
+          <img src={utkarshLogoFont} alt="Utkarsh 2026" className="h-6 w-auto [filter:invert(1)_brightness(3)_contrast(500%)] mix-blend-screen" />
+        </div>
 
-        {/* ── SUCCESS STATE ── */}
-        {step === "success" && ticket && (
-          <div className="panel p-8 text-center animate-in fade-in zoom-in duration-500">
-            <div className="h-1 w-full rounded-full bg-gradient-to-r from-neon-pink via-neon-purple to-neon-blue mb-6" />
-            <CheckCircle className="mx-auto h-14 w-14 text-neon-pink icon-glow-pink mb-4" />
-            <h1 className="text-2xl font-black tracking-wide">You're In!</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {studentName}, your photo has been submitted.
-            </p>
-
-            {/* Ticket */}
-            <div className="mt-6 rounded-2xl border-2 border-neon-gold/60 bg-gradient-to-br from-yellow-900/20 to-background p-5">
-              <p className="text-[10px] tracking-[0.3em] text-neon-gold/80 uppercase">Your Lucky Draw Ticket</p>
-              <p className="mt-2 text-3xl font-black text-neon-gold icon-glow-gold tracking-wider">{ticket}</p>
-              <p className="mt-2 text-[11px] text-muted-foreground">Every valid entry wins an equal chance!</p>
+        {/* STEP 1: Select or Drop File */}
+        {step === "select" && (
+          <div className="panel p-8 text-center space-y-6">
+            <div className="inline-flex h-16 w-16 items-center justify-center rounded-full border border-neon-pink/40 bg-neon-pink/10">
+              <Camera className="h-8 w-8 text-neon-pink icon-glow-pink" />
             </div>
 
-            <div className="mt-6 flex flex-col gap-3">
-              {preview && (
-                <img src={preview} alt="Your submitted photo"
-                  className="w-full rounded-xl object-cover max-h-48 border border-border" />
-              )}
-              <Link to="/" className="btn-neon rounded-full px-6 py-3 text-sm font-semibold inline-flex justify-center gap-2">
-                <Camera className="h-4 w-4" /> Back to Contest
+            <div>
+              <h1 className="text-2xl font-black tracking-wide">Upload Contest Photo</h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Select your best fest photo. Every valid entry receives a unique ticket!
+              </p>
+            </div>
+
+            {error && (
+              <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive flex items-center justify-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Drag and Drop Zone */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              onClick={() => fileRef.current?.click()}
+              className="border-2 border-dashed border-border/60 hover:border-neon-pink/60 rounded-2xl p-10 cursor-pointer transition-colors bg-secondary/20 hover:bg-secondary/40 flex flex-col items-center justify-center gap-3"
+            >
+              <Upload className="h-10 w-10 text-muted-foreground" />
+              <p className="text-sm font-semibold">
+                Drag & drop your photo here, or <span className="text-neon-pink underline">browse</span>
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Supports JPG, PNG, WEBP (Max {MAX_SIZE_MB}MB)
+              </p>
+            </div>
+
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/jpg"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+              }}
+            />
+          </div>
+        )}
+
+        {/* STEP 2: Preview Selected File */}
+        {step === "preview" && preview && (
+          <div className="panel p-8 text-center space-y-6">
+            <h1 className="text-2xl font-black">Confirm Photo</h1>
+
+            <div className="relative mx-auto w-64 h-64 rounded-2xl overflow-hidden border-2 border-neon-pink/50 shadow-[0_0_30px_rgba(236,72,153,0.3)]">
+              <img src={preview} alt="Selected preview" className="w-full h-full object-cover" />
+            </div>
+
+            <div className="flex items-center justify-center gap-4">
+              <button
+                onClick={() => { setStep("select"); setFile(null); setPreview(null); }}
+                className="btn-outline-neon border rounded-full px-6 py-3 text-xs font-semibold"
+              >
+                Choose Different
+              </button>
+              <button
+                onClick={handleSubmit}
+                className="btn-neon rounded-full px-8 py-3 text-xs font-black inline-flex items-center gap-2"
+              >
+                <Upload className="h-4 w-4" /> Submit Entry
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: Uploading Indicator */}
+        {step === "uploading" && (
+          <div className="panel p-12 text-center space-y-4">
+            <Loader2 className="mx-auto h-12 w-12 text-neon-pink animate-spin" />
+            <h2 className="text-xl font-bold">Uploading Photo & Generating Ticket…</h2>
+            <p className="text-xs text-muted-foreground">Storing image in Supabase Storage bucket contest-photos</p>
+          </div>
+        )}
+
+        {/* STEP 4: Success & Golden Ticket */}
+        {step === "success" && ticket && (
+          <div className="panel p-8 text-center space-y-6 animate-in zoom-in duration-500 border border-neon-gold/50 shadow-[0_0_50px_rgba(234,179,8,0.2)]">
+            <CheckCircle className="mx-auto h-16 w-16 text-neon-gold icon-glow-gold" />
+            <h1 className="text-3xl font-black text-neon-gold icon-glow-gold">CONTEST ENTRY CONFIRMED!</h1>
+            <p className="text-sm text-muted-foreground">Your photo has been uploaded and stored in the database.</p>
+
+            {/* Golden Ticket Card */}
+            <div className="relative mx-auto rounded-2xl border-2 border-neon-gold/60 bg-gradient-to-br from-yellow-900/30 via-background to-yellow-950/40 p-6 text-center shadow-2xl">
+              <div className="flex items-center justify-between text-[10px] tracking-[0.2em] text-neon-gold font-semibold uppercase mb-4 border-b border-neon-gold/20 pb-2">
+                <span>Utkarsh 2026 Ticket</span>
+                <span>Lucky Draw Entry</span>
+              </div>
+              <Ticket className="mx-auto h-10 w-10 text-neon-gold mb-2" />
+              <p className="text-3xl font-black font-mono tracking-widest text-neon-gold icon-glow-gold">
+                {ticket}
+              </p>
+              <p className="mt-2 text-xs text-foreground font-medium">{studentName || "Participant"}</p>
+              <p className="mt-4 text-[10px] text-muted-foreground">
+                Keep this ticket number safe! Winner draw on 9th Sep 2026 at 4:00 PM.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Link to="/gallery" className="btn-neon rounded-full px-8 py-3 text-xs font-black">
+                View Live Gallery →
+              </Link>
+              <Link to="/" className="btn-outline-neon border rounded-full px-6 py-3 text-xs font-semibold">
+                Back to Home
               </Link>
             </div>
           </div>
         )}
 
-        {/* ── SELECT/PREVIEW/UPLOADING/ERROR STATES ── */}
-        {step !== "success" && (
-          <div className="panel p-8">
-            <div className="h-1 w-full rounded-full bg-gradient-to-r from-neon-pink via-neon-purple to-neon-blue mb-6" />
-            <h1 className="text-2xl font-black tracking-wide">Upload Your Photo</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              One entry per participant. Choose your best shot!
-            </p>
-
-            {/* Drop zone */}
-            {step !== "uploading" && (
-              <div
-                onDrop={handleDrop}
-                onDragOver={(e) => e.preventDefault()}
-                onClick={() => step !== "preview" && fileRef.current?.click()}
-                className="mt-6 cursor-pointer rounded-2xl border-2 border-dashed border-neon-purple/50 bg-secondary/30 
-                           flex flex-col items-center justify-center py-8 px-4 text-center
-                           hover:border-neon-pink/70 hover:bg-secondary/50 transition-all duration-200"
-              >
-                {preview ? (
-                  <img src={preview} alt="Preview" className="max-h-64 rounded-xl object-contain" />
-                ) : (
-                  <>
-                    <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full border-2 border-dashed border-neon-purple/70 glow-ring">
-                      <Camera className="h-8 w-8 text-neon-pink icon-glow-pink" />
-                    </div>
-                    <p className="text-sm font-semibold">Tap to select photo</p>
-                    <p className="mt-1 text-[12px] text-muted-foreground">
-                      JPG, PNG or WEBP · Max {MAX_SIZE_MB}MB
-                    </p>
-                  </>
-                )}
-              </div>
-            )}
-
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
-            />
-
-            {/* Error */}
-            {error && (
-              <div className="mt-4 flex items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3">
-                <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
-                <p className="text-sm text-destructive">{error}</p>
-              </div>
-            )}
-
-            {/* Uploading */}
-            {step === "uploading" && (
-              <div className="mt-6 flex flex-col items-center gap-3 py-8">
-                <Loader2 className="h-10 w-10 animate-spin text-neon-pink" />
-                <p className="text-sm font-semibold">Uploading your photo...</p>
-                <p className="text-[12px] text-muted-foreground">Generating your ticket number...</p>
-              </div>
-            )}
-
-            {/* Buttons */}
-            {step !== "uploading" && (
-              <div className="mt-6 flex flex-col gap-3">
-                {step === "preview" && (
-                  <>
-                    <button onClick={handleSubmit}
-                      className="btn-neon w-full rounded-xl py-3.5 text-sm font-semibold inline-flex items-center justify-center gap-2">
-                      <Upload className="h-4 w-4" /> Submit &amp; Get Ticket
-                    </button>
-                    <button onClick={() => { setFile(null); setPreview(null); setStep("select"); setError(null); }}
-                      className="btn-outline-neon w-full rounded-xl py-3.5 text-sm font-semibold border">
-                      Choose Different Photo
-                    </button>
-                  </>
-                )}
-                {(step === "select" || step === "error") && (
-                  <button onClick={() => fileRef.current?.click()}
-                    className="btn-neon w-full rounded-xl py-3.5 text-sm font-semibold inline-flex items-center justify-center gap-2">
-                    <Camera className="h-4 w-4" /> Select Photo
-                  </button>
-                )}
-                {step === "error" && (
-                  <button onClick={() => { setError(null); setStep(file ? "preview" : "select"); }}
-                    className="btn-outline-neon w-full rounded-xl py-3.5 text-sm font-semibold border">
-                    Try Again
-                  </button>
-                )}
-              </div>
-            )}
-
-            <p className="mt-5 text-center text-[11px] text-muted-foreground">
-              <Link to="/" className="hover:text-neon-pink transition-colors">
-                <ArrowLeft className="inline h-3 w-3 mr-1" />Back to Contest
-              </Link>
-            </p>
+        {/* STEP 5: Error Screen */}
+        {step === "error" && (
+          <div className="panel p-8 text-center space-y-6 border border-destructive/40">
+            <AlertCircle className="mx-auto h-14 w-14 text-destructive mb-2" />
+            <h2 className="text-xl font-bold text-destructive">Upload Failed</h2>
+            <p className="text-sm text-muted-foreground">{error}</p>
+            <button
+              onClick={() => setStep("select")}
+              className="btn-outline-neon border rounded-full px-8 py-3 text-xs font-semibold"
+            >
+              Try Again
+            </button>
           </div>
         )}
       </div>

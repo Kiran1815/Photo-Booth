@@ -398,7 +398,24 @@ export const adminGetEntries = createServerFn({ method: "POST" })
 
       const { data: entries, error, count } = await query;
       if (error) return { success: false, error: error.message };
-      return { success: true, entries: entries ?? [], total: count ?? 0 };
+
+      const items = await Promise.all(
+        (entries ?? []).map(async (e: any) => {
+          let photo_url = e.photo_path;
+          if (e.photo_path && !e.photo_path.startsWith("data:") && !e.photo_path.startsWith("http")) {
+            const { data: pubData } = supabaseAdmin.storage
+              .from("contest-photos")
+              .getPublicUrl(e.photo_path);
+            photo_url = pubData?.publicUrl || e.photo_path;
+          }
+          return {
+            ...e,
+            photo_url,
+          };
+        })
+      );
+
+      return { success: true, entries: items, total: count ?? 0 };
     }
 
     // LocalStore Fallback
