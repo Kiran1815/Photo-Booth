@@ -75,14 +75,19 @@ const mockClient = {
     return { data: null, error: null };
   },
   storage: {
-    from() {
+    from(bucket: string) {
       return {
         async upload(path: string, file: File) {
-          // Convert file to object URL / data URL for local display
           return { data: { path }, error: null };
+        },
+        getPublicUrl(path: string) {
+          return { data: { publicUrl: path } };
         },
         async createSignedUrl(path: string) {
           return { data: { signedUrl: path }, error: null };
+        },
+        async remove(paths: string[]) {
+          return { data: paths, error: null };
         },
       };
     },
