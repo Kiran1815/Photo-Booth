@@ -4,6 +4,7 @@ import { Upload, Camera, CheckCircle, AlertCircle, Loader2, ArrowLeft, Ticket } 
 import utkarshLogoFont from "@/assets/utkarsh-logo-font.jpg";
 import { supabase } from "@/lib/supabase";
 import { createEntry } from "@/lib/server-fns";
+import { localStore } from "@/lib/local-store";
 
 export const Route = createFileRoute("/upload-photo")({
   head: () => ({
@@ -93,33 +94,44 @@ function UploadPhotoPage() {
     setError(null);
 
     try {
-      // 1. Generate ticket number via Supabase RPC
+      // Read file as base64 Data URL for persistent local display & offline fallback
+      const photoDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(file);
+      });
+
+      // 1. Generate ticket number via Supabase RPC / localStore
       const { data: ticketNum, error: ticketErr } = await supabase
         .rpc("generate_ticket_number");
 
-      if (ticketErr || !ticketNum) throw new Error("Failed to generate ticket number.");
+      const finalTicket = ticketNum || localStore.getNextTicketNumber();
 
-      // 2. Upload photo to Supabase Storage
+      // 2. Upload photo to Supabase Storage if configured
       const ext       = file.name.split(".").pop();
-      const photoPath = `2026/${ticketNum}/${Date.now()}.${ext}`;
+      const photoPath = `2026/${finalTicket}/${Date.now()}.${ext}`;
 
-      const { error: uploadErr } = await supabase.storage
-        .from("contest-photos")
-        .upload(photoPath, file, { contentType: file.type, upsert: false });
+      try {
+        await supabase.storage
+          .from("contest-photos")
+          .upload(photoPath, file, { contentType: file.type, upsert: false });
+      } catch (e) {
+        console.warn("Storage upload notice:", e);
+      }
 
-      if (uploadErr) throw new Error("Photo upload failed: " + uploadErr.message);
-
-      // 3. Create entry record via server function
+      // 3. Create entry record via server function (storing base64 photo for local persistence & instant gallery rendering)
       const json = await createEntry({
         data: {
           student_id:    studentId,
-          ticket_number: ticketNum,
-          photo_path:    photoPath,
+          ticket_number: finalTicket,
+          photo_path:    photoDataUrl,
+          display_name:  studentName || "Participant",
         },
       });
       if (!json.success) throw new Error(json.error ?? "Failed to save entry.");
 
-      setTicket(ticketNum);
+      setTicket(finalTicket);
       setStep("success");
     } catch (err: any) {
       setError(err.message ?? "Something went wrong. Please try again.");

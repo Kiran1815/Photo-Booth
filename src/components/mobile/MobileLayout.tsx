@@ -48,7 +48,7 @@ export function MobileLayout() {
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [activeNav, setActiveNav] = useState("home");
   const [mobileGallery, setMobileGallery] = useState<any[]>(DEFAULT_MOBILE_GALLERY);
-  const [totalEntries, setTotalEntries]   = useState(427);
+  const [totalEntries, setTotalEntries]   = useState(() => localStore.getEntries().length);
   const t = useCountdown();
 
   const handleMobileUploadClick = () => {

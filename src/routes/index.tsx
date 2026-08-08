@@ -100,7 +100,7 @@ const STEPS = [
 
 import { MobileLayout } from "@/components/mobile/MobileLayout";
 import { useEffect } from "react";
-import { getGallery } from "@/lib/server-fns";
+import { getGallery, getStats } from "@/lib/server-fns";
 import { localStore } from "@/lib/local-store";
 
 function Index() {
@@ -108,6 +108,7 @@ function Index() {
   const t = useCountdown();
   const [email, setEmail] = useState("");
   const [liveGallery, setLiveGallery] = useState<any[]>(GALLERY);
+  const [totalEntries, setTotalEntries] = useState<number>(0);
 
   const handleUploadClick = () => {
     const studentId = typeof window !== "undefined" ? sessionStorage.getItem("studentId") : null;
@@ -120,6 +121,7 @@ function Index() {
 
   useEffect(() => {
     const load = async () => {
+      // 1. Fetch gallery
       const res = await getGallery({ data: { page: 1, perPage: 6 } });
       if (res.success && res.items && res.items.length > 0) {
         setLiveGallery(res.items);
@@ -131,6 +133,14 @@ function Index() {
           display_name: e.display_name,
         }));
         setLiveGallery(local);
+      }
+
+      // 2. Fetch stats count dynamically
+      const statsRes = await getStats();
+      if (statsRes.success) {
+        setTotalEntries(statsRes.totalEntries);
+      } else {
+        setTotalEntries(localStore.getEntries().length);
       }
     };
     load();
@@ -232,7 +242,7 @@ function Index() {
           {
             icon: Users,
             label: "TOTAL ENTRIES",
-            value: "427",
+            value: String(totalEntries || localStore.getEntries().length),
             sub: "and counting...",
           },
           {
