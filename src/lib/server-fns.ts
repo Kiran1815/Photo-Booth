@@ -473,6 +473,40 @@ export const adminUpdateEntry = createServerFn({ method: "POST" })
     return { success: true };
   });
 
+/** Admin: delete entry permanently */
+export const adminDeleteEntry = createServerFn({ method: "POST" })
+  .validator(z.object({
+    token:   z.string(),
+    entryId: z.string(),
+  }))
+  .handler(async ({ data }) => {
+    const admin = await verifyAdmin(`Bearer ${data.token}`);
+    if (!admin) return { success: false, error: "Unauthorized" };
+
+    const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
+
+    if (isSupabaseConfigured && supabaseAdmin) {
+      const { error } = await supabaseAdmin
+        .from("entries")
+        .delete()
+        .eq("id", data.entryId);
+
+      if (error) return { success: false, error: error.message };
+
+      await supabaseAdmin.from("audit_logs").insert({
+        admin_id: admin.id,
+        action:   "ENTRY_DELETED",
+        metadata: { entry_id: data.entryId },
+      });
+
+      return { success: true };
+    }
+
+    // LocalStore Fallback
+    localStore.deleteEntry(data.entryId);
+    return { success: true };
+  });
+
 /** Admin: execute lucky draw */
 export const adminExecuteDraw = createServerFn({ method: "POST" })
   .validator(z.object({ token: z.string() }))

@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   Camera,
@@ -104,9 +104,19 @@ import { getGallery } from "@/lib/server-fns";
 import { localStore } from "@/lib/local-store";
 
 function Index() {
+  const navigate = useNavigate();
   const t = useCountdown();
   const [email, setEmail] = useState("");
   const [liveGallery, setLiveGallery] = useState<any[]>(GALLERY);
+
+  const handleUploadClick = () => {
+    const studentId = typeof window !== "undefined" ? sessionStorage.getItem("studentId") : null;
+    if (!studentId) {
+      navigate({ to: "/register" });
+    } else {
+      navigate({ to: "/upload-photo" });
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -202,20 +212,9 @@ function Index() {
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-4">
-              {/* Hidden file input to open device media */}
-              <input
-                type="file"
-                id="hero-photo-input"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) alert(`Photo selected: ${file.name}`);
-                }}
-              />
               <button
                 type="button"
-                onClick={() => document.getElementById("hero-photo-input")?.click()}
+                onClick={handleUploadClick}
                 className="inline-flex items-center gap-3 rounded-full px-8 py-4 text-sm font-semibold tracking-wide btn-neon"
               >
                 <Upload className="h-4 w-4 icon-glow-pink" />

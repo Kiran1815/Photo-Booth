@@ -36,6 +36,27 @@ function UploadPhotoPage() {
   const [ticket, setTicket] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Guard: redirect to register if not registered
+  if (!studentId) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 text-center">
+        <div className="pointer-events-none absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-neon-purple/10 blur-[120px]" />
+        <div className="pointer-events-none absolute -bottom-40 -right-40 h-[500px] w-[500px] rounded-full bg-neon-pink/10 blur-[120px]" />
+        <div className="relative z-10 max-w-sm">
+          <AlertCircle className="mx-auto h-16 w-16 text-neon-pink mb-4" />
+          <h1 className="text-2xl font-black">Registration Required</h1>
+          <p className="mt-3 text-sm text-muted-foreground leading-6">
+            You need to register for the event before uploading your photo.
+          </p>
+          <Link to="/register"
+            className="mt-6 inline-flex btn-neon rounded-full px-8 py-3 text-sm font-semibold items-center gap-2">
+            Register Now →
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   const handleFile = useCallback((f: File) => {
     setError(null);
 

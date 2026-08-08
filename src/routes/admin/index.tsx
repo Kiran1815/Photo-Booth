@@ -1,12 +1,18 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Users, CheckCircle, Clock, XCircle, BarChart3,
-  Search, Eye, ChevronRight, Trophy, Shuffle,
-  Shield, LogOut, AlertTriangle, Loader2, Ticket,
+  Search, Trophy, Shuffle,
+  Shield, LogOut, AlertTriangle, Loader2, Trash2,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { adminGetStats, adminGetEntries, adminUpdateEntry, adminExecuteDraw } from "@/lib/server-fns";
+import {
+  adminGetStats,
+  adminGetEntries,
+  adminUpdateEntry,
+  adminDeleteEntry,
+  adminExecuteDraw,
+} from "@/lib/server-fns";
 import utkarshLogoFont from "@/assets/utkarsh-logo-font.jpg";
 
 export const Route = createFileRoute("/admin/")({
@@ -30,11 +36,13 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(true);
 
   // Draw state machine
-  const [drawState,  setDrawState]  = useState<DrawState>("idle");
-  const [countdown,  setCountdown]  = useState(3);
-  const [flashTicket, setFlashTicket] = useState("...");
-  const [winner,     setWinner]     = useState<any>(null);
-  const [drawError,  setDrawError]  = useState<string | null>(null);
+  const [drawState,    setDrawState]    = useState<DrawState>("idle");
+  const [countdown,    setCountdown]    = useState(3);
+  const [flashTicket,  setFlashTicket]  = useState("...");
+  const [flashPhoto,   setFlashPhoto]   = useState<string | null>(null);
+  const [winner,       setWinner]       = useState<any>(null);
+  const [drawError,    setDrawError]    = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   // Session check
   useEffect(() => {
@@ -75,6 +83,16 @@ function AdminDashboard() {
     loadEntries();
   };
 
+  const handleDeleteEntry = async (entryId: string) => {
+    if (!token) return;
+    await adminDeleteEntry({ data: { token, entryId } });
+    setDeleteConfirm(null);
+    loadEntries();
+    // Also refresh stats
+    const statsRes = await adminGetStats({ data: { token } });
+    if (statsRes.success) setStats(statsRes.stats);
+  };
+
   // ── Lucky Draw ──
   const startDrawFlow = () => setDrawState("confirm");
 
@@ -94,16 +112,23 @@ function AdminDashboard() {
     // Start backend call
     const drawPromise = adminExecuteDraw({ data: { token } });
 
-    // Flash animation for 3s
-    const tickets = ["UTKARSH2026-????", "UTKARSH2026-...."];
-    let idx = 0;
+    // Collect photos from current entries for the shuffle animation
+    const entryPhotos = entries
+      .filter((e) => e.photo_url || e.photo_path)
+      .map((e) => e.photo_url || e.photo_path);
+
+    // Shuffle animation: cycle through ticket numbers AND photos
+    let photoIdx = 0;
     const flashInterval = setInterval(() => {
       const rand = String(Math.floor(Math.random() * 9999)).padStart(4, "0");
       setFlashTicket(`UTKARSH2026-${rand}`);
-      idx++;
+      if (entryPhotos.length > 0) {
+        setFlashPhoto(entryPhotos[photoIdx % entryPhotos.length]);
+        photoIdx++;
+      }
     }, 120);
 
-    const [res] = await Promise.all([drawPromise, delay(3500)]);
+    const [res] = await Promise.all([drawPromise, delay(4000)]);
     clearInterval(flashInterval);
 
     if (!res.success) {
@@ -113,6 +138,7 @@ function AdminDashboard() {
     }
 
     setWinner(res.winner);
+    setFlashPhoto(null);
     setDrawState("done");
     // Refresh stats
     const statsRes = await adminGetStats({ data: { token } });
@@ -222,10 +248,54 @@ function AdminDashboard() {
               </div>
             </div>
 
+            {/* Photo grid */}
+            {entries.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {entries.map((e: any) => {
+                  const photoSrc = e.photo_url || e.photo_path;
+                  return (
+                    <div key={e.id} className="group relative rounded-2xl overflow-hidden border border-border/50 bg-secondary/20">
+                      {photoSrc ? (
+                        <img
+                          src={photoSrc}
+                          alt={e.ticket_number}
+                          className="w-full aspect-square object-cover"
+                        />
+                      ) : (
+                        <div className="w-full aspect-square bg-secondary/40 flex items-center justify-center text-muted-foreground text-xs">
+                          No photo
+                        </div>
+                      )}
+                      {/* Overlay info */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2">
+                        <p className="text-[10px] font-mono text-neon-pink">{e.ticket_number}</p>
+                        <p className="text-[11px] font-semibold truncate">{e.students?.full_name || e.display_name}</p>
+                        <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[9px] font-semibold w-fit ${
+                          e.status === "valid" ? "bg-green-500/20 text-green-400"
+                            : e.status === "rejected" ? "bg-destructive/20 text-destructive"
+                            : "bg-neon-gold/20 text-neon-gold"
+                        }`}>{e.status}</span>
+                      </div>
+                      {/* Delete button */}
+                      <button
+                        onClick={() => setDeleteConfirm(e.id)}
+                        className="absolute top-2 right-2 rounded-full bg-destructive/80 p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive"
+                        title="Delete entry"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-white" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Table */}
             <div className="panel overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="border-b border-border/50">
                   <tr className="text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
+                    <th className="px-4 py-3 text-left">Photo</th>
                     <th className="px-4 py-3 text-left">Ticket</th>
                     <th className="px-4 py-3 text-left">Student</th>
                     <th className="px-4 py-3 text-left hidden md:table-cell">College</th>
@@ -235,51 +305,65 @@ function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/30">
-                  {entries.map((e: any) => (
-                    <tr key={e.id} className="hover:bg-secondary/30 transition-colors">
-                      <td className="px-4 py-3 font-mono text-[12px] text-neon-pink">{e.ticket_number}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-semibold">{e.students?.full_name}</p>
-                        <p className="text-[11px] text-muted-foreground">{e.students?.college_email}</p>
-                      </td>
-                      <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-[12px]">
-                        {e.students?.college_name}
-                      </td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-[12px]">
-                        {e.students?.register_number}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                          e.status === "valid"
-                            ? "bg-green-500/15 text-green-400"
-                            : e.status === "rejected"
-                            ? "bg-destructive/15 text-destructive"
-                            : "bg-neon-gold/15 text-neon-gold"
-                        }`}>
-                          {e.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-2">
-                          {e.status !== "valid" && (
-                            <button onClick={() => handleEntryStatus(e.id, "valid")}
-                              className="rounded-lg border border-green-500/40 px-2.5 py-1 text-[11px] text-green-400 hover:bg-green-500/10 transition-colors">
-                              ✓ Approve
-                            </button>
+                  {entries.map((e: any) => {
+                    const photoSrc = e.photo_url || e.photo_path;
+                    return (
+                      <tr key={e.id} className="hover:bg-secondary/30 transition-colors">
+                        <td className="px-4 py-3">
+                          {photoSrc ? (
+                            <img src={photoSrc} alt="" className="h-10 w-10 object-cover rounded-lg border border-border/40" />
+                          ) : (
+                            <div className="h-10 w-10 rounded-lg bg-secondary/40 flex items-center justify-center text-muted-foreground text-[9px]">N/A</div>
                           )}
-                          {e.status !== "rejected" && (
-                            <button onClick={() => handleEntryStatus(e.id, "rejected")}
-                              className="rounded-lg border border-destructive/40 px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/10 transition-colors">
-                              ✕ Reject
+                        </td>
+                        <td className="px-4 py-3 font-mono text-[12px] text-neon-pink">{e.ticket_number}</td>
+                        <td className="px-4 py-3">
+                          <p className="font-semibold">{e.students?.full_name || e.display_name}</p>
+                          <p className="text-[11px] text-muted-foreground">{e.students?.college_email}</p>
+                        </td>
+                        <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-[12px]">
+                          {e.students?.college_name || e.college_name}
+                        </td>
+                        <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-[12px]">
+                          {e.students?.register_number || e.register_number}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                            e.status === "valid"
+                              ? "bg-green-500/15 text-green-400"
+                              : e.status === "rejected"
+                              ? "bg-destructive/15 text-destructive"
+                              : "bg-neon-gold/15 text-neon-gold"
+                          }`}>
+                            {e.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2 flex-wrap">
+                            {e.status !== "valid" && (
+                              <button onClick={() => handleEntryStatus(e.id, "valid")}
+                                className="rounded-lg border border-green-500/40 px-2.5 py-1 text-[11px] text-green-400 hover:bg-green-500/10 transition-colors">
+                                ✓ Approve
+                              </button>
+                            )}
+                            {e.status !== "rejected" && (
+                              <button onClick={() => handleEntryStatus(e.id, "rejected")}
+                                className="rounded-lg border border-destructive/40 px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/10 transition-colors">
+                                ✕ Reject
+                              </button>
+                            )}
+                            <button onClick={() => setDeleteConfirm(e.id)}
+                              className="rounded-lg border border-destructive/60 px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/10 transition-colors inline-flex items-center gap-1">
+                              <Trash2 className="h-3 w-3" /> Delete
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {entries.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                      <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground text-sm">
                         No entries found.
                       </td>
                     </tr>
@@ -366,10 +450,29 @@ function AdminDashboard() {
                   </div>
                 )}
 
-                {/* ANIMATING */}
+                {/* ANIMATING — photo shuffle */}
                 {drawState === "animating" && (
-                  <div className="py-8">
-                    <Shuffle className="mx-auto h-12 w-12 text-neon-purple icon-glow-purple animate-spin mb-4" />
+                  <div className="py-6">
+                    <p className="text-[11px] tracking-widest text-muted-foreground uppercase mb-4 animate-pulse">
+                      Shuffling all entries…
+                    </p>
+                    {/* Photo wheel */}
+                    {flashPhoto ? (
+                      <div className="relative mx-auto mb-4 w-48 h-48 rounded-2xl overflow-hidden border-2 border-neon-pink/60 shadow-[0_0_40px_rgba(236,72,153,0.4)]">
+                        <img
+                          key={flashPhoto}
+                          src={flashPhoto}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          style={{ animation: "pulse 0.12s ease-in-out" }}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-background/40 to-transparent" />
+                      </div>
+                    ) : (
+                      <div className="mx-auto mb-4 w-48 h-48 rounded-2xl border-2 border-neon-pink/60 bg-secondary/30 flex items-center justify-center">
+                        <Shuffle className="h-12 w-12 text-neon-purple animate-spin" />
+                      </div>
+                    )}
                     <p className="text-2xl font-black text-neon-pink icon-glow-pink font-mono animate-pulse">
                       {flashTicket}
                     </p>
@@ -387,8 +490,8 @@ function AdminDashboard() {
                       <p className="mt-2 text-lg font-bold">{winner.display_name}</p>
                       <p className="text-sm text-muted-foreground">{winner.college_name}</p>
                     </div>
-                    {winner.photo_path && (
-                      <img src={winner.photo_url} alt="Winner"
+                    {(winner.photo_url || winner.photo_path) && (
+                      <img src={winner.photo_url || winner.photo_path} alt="Winner"
                         className="mx-auto mt-4 w-48 h-48 object-cover rounded-xl border-2 border-neon-gold/60" />
                     )}
                     <p className="mt-4 text-[12px] text-muted-foreground">
@@ -414,6 +517,29 @@ function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* ── DELETE CONFIRM MODAL ── */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="panel p-8 max-w-sm w-full mx-4 border border-destructive/40 text-center">
+            <Trash2 className="mx-auto h-12 w-12 text-destructive mb-4" />
+            <h2 className="text-lg font-black">Delete Entry?</h2>
+            <p className="mt-2 text-sm text-muted-foreground mb-6">
+              This will permanently delete this entry and photo. This action <strong className="text-foreground">cannot be undone</strong>.
+            </p>
+            <div className="flex gap-4 justify-center">
+              <button onClick={() => setDeleteConfirm(null)}
+                className="btn-outline-neon border rounded-full px-6 py-2.5 text-sm font-semibold">
+                Cancel
+              </button>
+              <button onClick={() => handleDeleteEntry(deleteConfirm)}
+                className="rounded-full bg-destructive px-6 py-2.5 text-sm font-black text-white hover:bg-destructive/80 transition-colors inline-flex items-center gap-2">
+                <Trash2 className="h-4 w-4" /> Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

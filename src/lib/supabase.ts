@@ -39,30 +39,19 @@ const mockClient = {
     },
     async signInWithPassword({ email, password }: any) {
       if (
-        (email === "admin@utkarsh2026.com" || email === "admin") &&
-        (password === "admin123" || password === "admin")
+        email.trim() === "photobooth2026@gmail.com" &&
+        password === "utkarsh2026pbc"
       ) {
         const session = {
           access_token: "mock_admin_token_" + Date.now(),
-          user: { id: "admin_1", email: "admin@utkarsh2026.com", role: "admin" },
+          user: { id: "admin_1", email: "photobooth2026@gmail.com", role: "admin" },
         };
         if (typeof window !== "undefined") {
           localStorage.setItem("utkarsh_admin_session", JSON.stringify(session));
         }
         return { data: { session, user: session.user }, error: null };
       }
-      // Accept any demo admin email/password if not blank
-      if (email && password) {
-        const session = {
-          access_token: "mock_admin_token_" + Date.now(),
-          user: { id: "admin_1", email, role: "admin" },
-        };
-        if (typeof window !== "undefined") {
-          localStorage.setItem("utkarsh_admin_session", JSON.stringify(session));
-        }
-        return { data: { session, user: session.user }, error: null };
-      }
-      return { data: { session: null }, error: new Error("Invalid admin credentials") };
+      return { data: { session: null }, error: new Error("Invalid admin credentials. Access denied.") };
     },
     async signOut() {
       if (typeof window !== "undefined") {

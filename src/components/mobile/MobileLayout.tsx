@@ -3,8 +3,8 @@
  * Complete premium mobile layout — shown only on screens < 768px
  * Desktop layout is completely separate and unchanged.
  */
-import { useState, useRef, useEffect } from "react";
-import { Link } from "@tanstack/react-router";
+import { useState, useEffect } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   Camera, Upload, Trophy, Gift, Users, Clock,
   Home, Image, Ticket, Star, Menu, X, ChevronRight,
@@ -44,12 +44,21 @@ const DEFAULT_MOBILE_GALLERY = [
 
 // ── Main Component ────────────────────────────────────
 export function MobileLayout() {
+  const navigate = useNavigate();
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [activeNav, setActiveNav] = useState("home");
   const [mobileGallery, setMobileGallery] = useState<any[]>(DEFAULT_MOBILE_GALLERY);
   const [totalEntries, setTotalEntries]   = useState(427);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const t       = useCountdown();
+  const t = useCountdown();
+
+  const handleMobileUploadClick = () => {
+    const studentId = typeof window !== "undefined" ? sessionStorage.getItem("studentId") : null;
+    if (!studentId) {
+      navigate({ to: "/register" });
+    } else {
+      navigate({ to: "/upload-photo" });
+    }
+  };
 
   const loadMobileData = async () => {
     const res = await getGallery({ data: { page: 1, perPage: 10 } });
@@ -75,30 +84,7 @@ export function MobileLayout() {
     loadMobileData();
   }, []);
 
-  const handleMobileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      const photoUrl = evt.target?.result as string;
-      const ticketNum = localStore.getNextTicketNumber();
 
-      await createEntry({
-        data: {
-          student_id: `mobile_guest_${Date.now()}`,
-          ticket_number: ticketNum,
-          photo_path: photoUrl,
-          display_name: "You",
-          college_name: "Fest Participant",
-        },
-      });
-
-      alert(`Photo uploaded! Your ticket: ${ticketNum}`);
-      loadMobileData();
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  };
 
   const NAV_LINKS = [
     { label: "Home",         href: "#m-home" },
@@ -205,9 +191,7 @@ export function MobileLayout() {
 
             {/* Upload CTA */}
             <div className="mt-6">
-              <input ref={fileRef} type="file" accept="image/*" className="hidden"
-                onChange={handleMobileUpload} />
-              <button onClick={() => fileRef.current?.click()}
+              <button onClick={handleMobileUploadClick}
                 className="btn-neon w-full rounded-2xl py-4 text-sm font-black inline-flex items-center justify-center gap-2">
                 <Upload className="h-4 w-4" />
                 UPLOAD YOUR PHOTO
@@ -422,14 +406,14 @@ export function MobileLayout() {
         <div className="flex items-center justify-around px-2 py-2">
           {BOTTOM_NAV.map((n) => (
             n.cta ? (
-              <a key={n.id} href={n.href}
-                onClick={(e) => { e.preventDefault(); fileRef.current?.click(); }}
+              <button key={n.id}
+                onClick={handleMobileUploadClick}
                 className="flex flex-col items-center gap-0.5 -mt-5">
                 <span className="btn-neon flex h-12 w-12 items-center justify-center rounded-full shadow-lg">
                   <n.icon className="h-5 w-5" />
                 </span>
                 <span className="text-[9px] font-semibold text-neon-pink mt-1">{n.label}</span>
-              </a>
+              </button>
             ) : (
               <a key={n.id} href={n.href}
                 onClick={() => setActiveNav(n.id)}

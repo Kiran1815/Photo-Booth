@@ -132,4 +132,12 @@ export const localStore = {
       localStorage.setItem(STORAGE_KEYS.ENTRIES, JSON.stringify(updated));
     }
   },
+
+  deleteEntry(id: string): void {
+    const entries = this.getEntries();
+    const updated = entries.filter((e) => e.id !== id);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STORAGE_KEYS.ENTRIES, JSON.stringify(updated));
+    }
+  },
 };
