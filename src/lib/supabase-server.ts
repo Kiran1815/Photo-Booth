@@ -7,22 +7,30 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+if (rawUrl.endsWith("/")) rawUrl = rawUrl.slice(0, -1);
+if (rawUrl.endsWith("/rest/v1")) rawUrl = rawUrl.slice(0, -8);
+const supabaseUrl = rawUrl;
+
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  process.env.SUPABASE_PUBLISHABLE_KEY;
 
 const isServerConfigured =
   Boolean(supabaseUrl) &&
-  Boolean(serviceRoleKey) &&
+  Boolean(supabaseKey) &&
   !supabaseUrl?.includes("YOUR_PROJECT_ID") &&
-  !serviceRoleKey?.includes("YOUR_SERVICE_ROLE_KEY");
+  !supabaseKey?.includes("YOUR_ANON_KEY");
 
 export const isSupabaseConfigured = isServerConfigured;
 
 let client: any = null;
 
-if (isServerConfigured && supabaseUrl && serviceRoleKey) {
+if (isServerConfigured && supabaseUrl && supabaseKey) {
   try {
-    client = createClient<Database>(supabaseUrl, serviceRoleKey, {
+    client = createClient<Database>(supabaseUrl, supabaseKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
   } catch (err) {

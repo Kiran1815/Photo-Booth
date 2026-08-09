@@ -79,7 +79,7 @@ export const registerStudent = createServerFn({ method: "POST" })
 
       if (error) {
         console.error("Registration error:", error);
-        return { success: false, error: "Registration failed. Please try again." };
+        return { success: false, error: `Registration failed: ${error.message}` };
       }
 
       return { success: true, studentId: student.id, student };
@@ -138,7 +138,7 @@ export const createEntry = createServerFn({ method: "POST" })
 
       if (error) {
         console.error("Create entry error:", error);
-        return { success: false, error: "Failed to save entry. Please try again." };
+        return { success: false, error: `Failed to save entry in database: ${error.message}` };
       }
 
       return { success: true, entry };

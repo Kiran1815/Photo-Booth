@@ -8,8 +8,15 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
 import { localStore } from "./local-store";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+let rawUrl = (import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || "") as string;
+if (rawUrl.endsWith("/")) rawUrl = rawUrl.slice(0, -1);
+if (rawUrl.endsWith("/rest/v1")) rawUrl = rawUrl.slice(0, -8);
+const supabaseUrl = rawUrl;
+
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.SUPABASE_ANON_KEY ||
+  import.meta.env.SUPABASE_PUBLISHABLE_KEY ||
+  "") as string;
 
 const isConfigured =
   Boolean(supabaseUrl) &&
