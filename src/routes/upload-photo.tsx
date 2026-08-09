@@ -115,7 +115,7 @@ function UploadPhotoPage() {
 
       const savedPhotoPath = pubData?.publicUrl || storageResult.path;
 
-      // 4. Insert entry record in database ("entries" table) ONLY after successful photo upload
+      // 4. Update student record in public.students table ONLY after successful photo upload
       const res = await createEntry({
         data: {
           student_id:    studentId,
@@ -126,11 +126,12 @@ function UploadPhotoPage() {
       });
 
       if (!res.success) {
-        throw new Error(res.error ?? "Failed to save entry in database.");
+        throw new Error(res.error ?? "Failed to save photo in student record.");
       }
 
       // 5. Success: set verified ticket number
-      setTicket(ticketNum);
+      const finalTicket = res.entry?.ticket_number || ticketNum;
+      setTicket(finalTicket);
       setStep("success");
     } catch (err: any) {
       console.error("Submission failure:", err);
