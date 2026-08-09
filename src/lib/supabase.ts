@@ -39,12 +39,12 @@ const mockClient = {
     },
     async signInWithPassword({ email, password }: any) {
       if (
-        email.trim() === "photobooth2026@gmail.com" &&
+        email.trim() === "photobooth2k26@gmail.com" &&
         password === "utkarsh2026pbc"
       ) {
         const session = {
           access_token: "mock_admin_token_" + Date.now(),
-          user: { id: "admin_1", email: "photobooth2026@gmail.com", role: "admin" },
+          user: { id: "admin_1", email: "photobooth2k26@gmail.com", role: "admin" },
         };
         if (typeof window !== "undefined") {
           localStorage.setItem("utkarsh_admin_session", JSON.stringify(session));
