@@ -8,7 +8,13 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
 import { localStore } from "./local-store";
 
-let rawUrl = (import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || "") as string;
+const DEFAULT_SUPABASE_URL = "https://ddbxwyxgyjlpthenvbzc.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_kce73wwFdrmRfqtX0dWtHg_SAEcywz1";
+
+let rawUrl = (import.meta.env.VITE_SUPABASE_URL ||
+  import.meta.env.SUPABASE_URL ||
+  DEFAULT_SUPABASE_URL) as string;
+
 if (rawUrl.endsWith("/")) rawUrl = rawUrl.slice(0, -1);
 if (rawUrl.endsWith("/rest/v1")) rawUrl = rawUrl.slice(0, -8);
 const supabaseUrl = rawUrl;
@@ -16,22 +22,14 @@ const supabaseUrl = rawUrl;
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ||
   import.meta.env.SUPABASE_ANON_KEY ||
   import.meta.env.SUPABASE_PUBLISHABLE_KEY ||
-  "") as string;
-
-const isConfigured =
-  Boolean(supabaseUrl) &&
-  Boolean(supabaseAnonKey) &&
-  !supabaseUrl.includes("YOUR_PROJECT_ID") &&
-  !supabaseAnonKey.includes("YOUR_ANON_KEY");
+  DEFAULT_SUPABASE_ANON_KEY) as string;
 
 let realClient: any = null;
 
-if (isConfigured) {
-  try {
-    realClient = createClient<Database>(supabaseUrl, supabaseAnonKey);
-  } catch (err) {
-    console.warn("Failed to initialize Supabase client, falling back to local mode:", err);
-  }
+try {
+  realClient = createClient<Database>(supabaseUrl, supabaseAnonKey);
+} catch (err) {
+  console.warn("Failed to initialize Supabase client:", err);
 }
 
 // Fallback client structure matching Supabase interface
@@ -101,4 +99,4 @@ const mockClient = {
   },
 };
 
-export const supabase = isConfigured && realClient ? realClient : (mockClient as any);
+export const supabase = realClient || (mockClient as any);

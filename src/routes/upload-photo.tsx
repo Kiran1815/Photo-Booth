@@ -92,16 +92,6 @@ function UploadPhotoPage() {
       const storageFilePath = `${ticketNum}.${ext}`;
 
       // 3. Upload photo file directly to Supabase Storage bucket "contest-photos"
-      let savedPhotoPath = "";
-
-      // Convert file to base64 Data URL for local fallback or inline preview
-      const photoDataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload  = (e) => resolve(e.target?.result as string);
-        reader.onerror = (e) => reject(e);
-        reader.readAsDataURL(file);
-      });
-
       const { data: storageResult, error: uploadErr } = await supabase.storage
         .from("contest-photos")
         .upload(storageFilePath, file, {
@@ -110,23 +100,20 @@ function UploadPhotoPage() {
         });
 
       if (uploadErr) {
-        // If Supabase is configured and storage upload failed, fail hard and show error
         console.error("Storage upload error:", uploadErr);
-        if (!uploadErr.message.includes("fallback")) {
-          throw new Error(`Photo upload failed: ${uploadErr.message}`);
-        }
+        throw new Error(`Photo upload failed: ${uploadErr.message}`);
       }
 
-      if (storageResult?.path) {
-        // Get public URL from Supabase Storage bucket "contest-photos"
-        const { data: pubData } = supabase.storage
-          .from("contest-photos")
-          .getPublicUrl(storageResult.path);
-        savedPhotoPath = pubData?.publicUrl || storageResult.path;
-      } else {
-        // Fallback to base64 data URL for offline local testing
-        savedPhotoPath = photoDataUrl;
+      if (!storageResult?.path) {
+        throw new Error("Photo upload failed: No storage path returned from Supabase.");
       }
+
+      // Get public URL from Supabase Storage bucket "contest-photos"
+      const { data: pubData } = supabase.storage
+        .from("contest-photos")
+        .getPublicUrl(storageResult.path);
+
+      const savedPhotoPath = pubData?.publicUrl || storageResult.path;
 
       // 4. Insert entry record in database ("entries" table) ONLY after successful photo upload
       const res = await createEntry({
