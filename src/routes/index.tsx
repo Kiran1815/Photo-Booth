@@ -38,7 +38,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Upload your best click from Utkarsh 2026, get a lucky draw ticket and win from a ₹5,000 prize pool. One entry per college email.",
+          "Upload your best click from Utkarsh 2026, get a lucky draw ticket and win from a ₹5,000 prize pool. One entry per email.",
       },
       { property: "og:title", content: "Utkarsh 2026 Photo Booth Contest" },
       {

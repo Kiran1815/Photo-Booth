@@ -126,7 +126,7 @@ function RegisterPage() {
                 name="email"
                 value={form.email}
                 onChange={handleChange}
-                placeholder="College Email (your@college.edu.in)"
+                placeholder="Email Address"
                 required
                 className="w-full rounded-xl border border-border bg-input pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-neon-purple focus:ring-2 focus:ring-neon-purple/30 transition-all"
               />
