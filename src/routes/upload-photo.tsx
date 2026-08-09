@@ -88,15 +88,15 @@ function UploadPhotoPage() {
       }
 
       // 2. Prepare file path in bucket "contest-photos"
-      const ext = file.name.split(".").pop() || "jpg";
-      const storageFilePath = `${ticketNum}.${ext}`;
+      const ext = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+      const storageFilePath = `${ticketNum}_${Date.now()}.${ext}`;
 
       // 3. Upload photo file directly to Supabase Storage bucket "contest-photos"
       const { data: storageResult, error: uploadErr } = await supabase.storage
         .from("contest-photos")
         .upload(storageFilePath, file, {
-          contentType: file.type,
-          upsert: true,
+          contentType: file.type || "image/jpeg",
+          upsert: false,
         });
 
       if (uploadErr) {
