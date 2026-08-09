@@ -54,8 +54,12 @@ function RegisterPage() {
 
       // Store student session info locally for the next upload step
       if (typeof window !== "undefined") {
-        sessionStorage.setItem("studentId",   res.studentId!);
-        sessionStorage.setItem("studentName", form.name.trim());
+        sessionStorage.setItem("studentId",     res.studentId!);
+        sessionStorage.setItem("studentName",   form.name.trim());
+        sessionStorage.setItem("studentEmail",  form.email.trim());
+        // Persist ticket from DB so it never shows a stale/hardcoded value
+        const ticketFromDb = (res.student as any)?.ticket_id ?? "";
+        if (ticketFromDb) sessionStorage.setItem("studentTicket", ticketFromDb);
       }
 
       navigate({ to: "/upload-photo" });

@@ -17,7 +17,7 @@ import trophy from "@/assets/trophy.png";
 import giftbox from "@/assets/giftbox.png";
 
 
-import { getStats } from "@/lib/server-fns";
+import { getStats, subscribeNotification } from "@/lib/server-fns";
 import { localStore } from "@/lib/local-store";
 import { useCountdown, CountdownBoxes, pad } from "@/components/site/Countdown";
 
@@ -37,6 +37,8 @@ export function MobileLayout() {
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [activeNav, setActiveNav] = useState("home");
   const [totalEntries, setTotalEntries]   = useState(() => localStore.getEntries().length);
+  const [notifyState, setNotifyState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [notifyMsg,   setNotifyMsg]   = useState<string>("");
   const t = useCountdown();
 
   const handleMobileUploadClick = () => {
@@ -45,6 +47,28 @@ export function MobileLayout() {
       navigate({ to: "/register" });
     } else {
       navigate({ to: "/upload-photo" });
+    }
+  };
+
+  const handleNotifyMe = async () => {
+    if (notifyState === "loading") return;
+    const studentId    = typeof window !== "undefined" ? sessionStorage.getItem("studentId")    : null;
+    const studentEmail = typeof window !== "undefined" ? sessionStorage.getItem("studentEmail") : null;
+    if (!studentId && !studentEmail) {
+      setNotifyMsg("Please register first, then tap Notify Me.");
+      setNotifyState("error");
+      return;
+    }
+    setNotifyState("loading");
+    const res = await subscribeNotification({
+      data: { student_id: studentId ?? undefined, college_email: studentEmail ?? undefined },
+    });
+    if (res.success) {
+      setNotifyMsg(res.message ?? "You're all set! 🎉");
+      setNotifyState("done");
+    } else {
+      setNotifyMsg(res.error ?? "Something went wrong.");
+      setNotifyState("error");
     }
   };
 
@@ -295,9 +319,18 @@ export function MobileLayout() {
             </div>
             <p className="text-sm text-muted-foreground mb-1">Winners will be announced on</p>
             <p className="font-semibold text-neon-pink">9th Sep, 2026 at 4:00 PM</p>
-            <button className="mt-4 inline-flex items-center gap-2 rounded-xl border border-neon-purple/60 px-5 py-2.5 text-sm font-semibold hover:bg-secondary transition-colors">
-              🔔 Notify Me
+            <button
+              onClick={handleNotifyMe}
+              disabled={notifyState === "loading" || notifyState === "done"}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl border border-neon-purple/60 px-5 py-2.5 text-sm font-semibold hover:bg-secondary transition-colors disabled:opacity-60"
+            >
+              {notifyState === "loading" ? "Saving\u2026" : "\uD83D\uDD14 Notify Me"}
             </button>
+            {notifyMsg && (
+              <p className={`mt-2 text-[12px] leading-5 ${
+                notifyState === "error" ? "text-destructive" : "text-green-400"
+              }`}>{notifyMsg}</p>
+            )}
           </div>
         </section>
 

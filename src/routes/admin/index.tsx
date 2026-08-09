@@ -77,20 +77,31 @@ function AdminDashboard() {
     navigate({ to: "/admin-login" });
   };
 
+  const refreshStats = async () => {
+    if (!token) return;
+    const statsRes = await adminGetStats({ data: { token } });
+    if (statsRes.success) setStats(statsRes.stats);
+  };
+
   const handleEntryStatus = async (entryId: string, status: "valid" | "rejected") => {
     if (!token) return;
-    await adminUpdateEntry({ data: { token, entryId, status } });
-    loadEntries();
+    const res = await adminUpdateEntry({ data: { token, entryId, status } });
+    if (!res.success) {
+      alert(`Failed to update status: ${res.error ?? "Unknown error"}`);
+      return;
+    }
+    await Promise.all([loadEntries(), refreshStats()]);
   };
 
   const handleDeleteEntry = async (entryId: string) => {
     if (!token) return;
-    await adminDeleteEntry({ data: { token, entryId } });
+    const res = await adminDeleteEntry({ data: { token, entryId } });
     setDeleteConfirm(null);
-    loadEntries();
-    // Also refresh stats
-    const statsRes = await adminGetStats({ data: { token } });
-    if (statsRes.success) setStats(statsRes.stats);
+    if (!res.success) {
+      alert(`Delete failed: ${res.error ?? "Unknown error"}`);
+      return;
+    }
+    await Promise.all([loadEntries(), refreshStats()]);
   };
 
   // ── Lucky Draw ──
@@ -140,9 +151,7 @@ function AdminDashboard() {
     setWinner(res.winner);
     setFlashPhoto(null);
     setDrawState("done");
-    // Refresh stats
-    const statsRes = await adminGetStats({ data: { token } });
-    if (statsRes.success) setStats(statsRes.stats);
+    await refreshStats();
   };
 
   if (loading || !token) {

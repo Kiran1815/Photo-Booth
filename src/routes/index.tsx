@@ -87,7 +87,7 @@ const STEPS = [
 
 import { MobileLayout } from "@/components/mobile/MobileLayout";
 import { useEffect } from "react";
-import { getStats } from "@/lib/server-fns";
+import { getStats, subscribeNotification } from "@/lib/server-fns";
 import { localStore } from "@/lib/local-store";
 
 function Index() {
@@ -95,6 +95,30 @@ function Index() {
   const t = useCountdown();
   const [email, setEmail] = useState("");
   const [totalEntries, setTotalEntries] = useState<number>(0);
+  const [notifyState, setNotifyState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [notifyMsg,   setNotifyMsg]   = useState<string>("");
+
+  const handleNotifyMe = async () => {
+    if (notifyState === "loading") return;
+    const studentId    = typeof window !== "undefined" ? sessionStorage.getItem("studentId")    : null;
+    const studentEmail = typeof window !== "undefined" ? sessionStorage.getItem("studentEmail") : null;
+    if (!studentId && !studentEmail) {
+      setNotifyMsg("Please register first, then click Notify Me.");
+      setNotifyState("error");
+      return;
+    }
+    setNotifyState("loading");
+    const res = await subscribeNotification({
+      data: { student_id: studentId ?? undefined, college_email: studentEmail ?? undefined },
+    });
+    if (res.success) {
+      setNotifyMsg(res.message ?? "You're all set! 🎉");
+      setNotifyState("done");
+    } else {
+      setNotifyMsg(res.error ?? "Something went wrong. Please try again.");
+      setNotifyState("error");
+    }
+  };
 
   const handleUploadClick = () => {
     const studentId = typeof window !== "undefined" ? sessionStorage.getItem("studentId") : null;
@@ -374,9 +398,22 @@ function Index() {
               <br />
               9th Sep, 2026 at 4:00 PM
             </p>
-            <button className="mt-6 inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm btn-outline-neon">
-              <Bell className="h-4 w-4 text-neon-purple icon-glow-purple" /> NOTIFY ME
+            <button
+              onClick={handleNotifyMe}
+              disabled={notifyState === "loading" || notifyState === "done"}
+              className="mt-6 inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm btn-outline-neon disabled:opacity-60"
+            >
+              {notifyState === "loading" ? (
+                <span className="animate-pulse">Saving…</span>
+              ) : (
+                <><Bell className="h-4 w-4 text-neon-purple icon-glow-purple" /> NOTIFY ME</>
+              )}
             </button>
+            {notifyMsg && (
+              <p className={`mt-3 text-[12px] leading-5 ${
+                notifyState === "error" ? "text-destructive" : "text-green-400"
+              }`}>{notifyMsg}</p>
+            )}
           </div>
           <img
             src={giftbox}

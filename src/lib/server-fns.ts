@@ -1,7 +1,8 @@
 /**
  * src/lib/server-fns.ts
  * TanStack Start server functions — all backend API logic.
- * Connects directly to Supabase public.students table.
+ * Single source of truth: public.students table.
+ * NO references to public.entries — that table does not exist.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -22,47 +23,45 @@ export const AdminLoginSchema = z.object({
   password: z.string().min(6),
 });
 
-// ── Server Functions ──────────────────────────────────
+// ── Helper ────────────────────────────────────────────
 
-/** Register a new student in public.students table */
+/**
+ * Derives a storage object path from a full public URL.
+ * e.g. "https://.../contest-photos/foo.jpg"  → "foo.jpg"
+ */
+function storagePathFromUrl(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    // Path looks like: /storage/v1/object/public/contest-photos/<objectPath>
+    const marker = "/contest-photos/";
+    const idx = url.indexOf(marker);
+    if (idx !== -1) return url.slice(idx + marker.length);
+  } catch { /* ignore */ }
+  return null;
+}
+
+// ── Public Functions ──────────────────────────────────
+
+/** Register a new student in public.students */
 export const registerStudent = createServerFn({ method: "POST" })
   .validator(RegisterSchema)
   .handler(async ({ data }) => {
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      // 1. Check for duplicates in Supabase students table
+      // Duplicate checks
       const { data: existingEmail } = await supabaseAdmin
-        .from("students")
-        .select("id")
-        .eq("college_email", data.college_email)
-        .maybeSingle();
-
-      if (existingEmail) {
-        return { success: false, error: "This email is already registered." };
-      }
+        .from("students").select("id").eq("college_email", data.college_email).maybeSingle();
+      if (existingEmail) return { success: false, error: "This email is already registered." };
 
       const { data: existingReg } = await supabaseAdmin
-        .from("students")
-        .select("id")
-        .eq("register_number", data.register_number)
-        .maybeSingle();
-
-      if (existingReg) {
-        return { success: false, error: "This register number is already used." };
-      }
+        .from("students").select("id").eq("register_number", data.register_number).maybeSingle();
+      if (existingReg) return { success: false, error: "This register number is already used." };
 
       const { data: existingPhone } = await supabaseAdmin
-        .from("students")
-        .select("id")
-        .eq("contact_number", data.contact_number)
-        .maybeSingle();
+        .from("students").select("id").eq("contact_number", data.contact_number).maybeSingle();
+      if (existingPhone) return { success: false, error: "This phone number is already registered." };
 
-      if (existingPhone) {
-        return { success: false, error: "This phone number is already registered." };
-      }
-
-      // 2. Insert student into public.students
       const { data: student, error } = await supabaseAdmin
         .from("students")
         .insert({
@@ -74,7 +73,7 @@ export const registerStudent = createServerFn({ method: "POST" })
           status:          "active",
           verified_at:     new Date().toISOString(),
         })
-        .select("id, full_name, college_name, college_email, ticket_id")
+        .select("id, full_name, college_name, college_email, ticket_id, ticket_number")
         .single();
 
       if (error) {
@@ -85,88 +84,85 @@ export const registerStudent = createServerFn({ method: "POST" })
       return { success: true, studentId: student.id, student };
     }
 
-    // ── LocalStore Fallback ──
+    // LocalStore Fallback
     const students = localStore.getStudents();
-    if (students.some((s: any) => s.college_email === data.college_email)) {
+    if (students.some((s: any) => s.college_email === data.college_email))
       return { success: false, error: "This email is already registered." };
-    }
-    if (students.some((s: any) => s.register_number === data.register_number)) {
+    if (students.some((s: any) => s.register_number === data.register_number))
       return { success: false, error: "This register number is already used." };
-    }
-    if (students.some((s: any) => s.contact_number === data.contact_number)) {
+    if (students.some((s: any) => s.contact_number === data.contact_number))
       return { success: false, error: "This phone number is already registered." };
-    }
 
     const student = localStore.addStudent(data);
     return { success: true, studentId: student.id, student };
   });
 
-/** Update student record in public.students with photo_path after successful upload */
+/** After successful storage upload, save photo_path into public.students */
 export const createEntry = createServerFn({ method: "POST" })
   .validator(z.object({
-    student_id: z.string(),
+    student_id:    z.string(),
     ticket_number: z.string(),
-    photo_path: z.string(),
-    display_name: z.string().optional(),
-    college_name: z.string().optional(),
+    photo_path:    z.string(),
+    display_name:  z.string().optional(),
+    college_name:  z.string().optional(),
   }))
   .handler(async ({ data }) => {
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      // Check if student exists
+      // Fetch current student row
       const { data: student, error: fetchErr } = await supabaseAdmin
         .from("students")
-        .select("id, ticket_id, photo_path")
+        .select("id, ticket_id, ticket_number, photo_path")
         .eq("id", data.student_id)
         .maybeSingle();
 
       if (fetchErr || !student) {
-        return { success: false, error: "Student record not found." };
+        return { success: false, error: `Student record not found: ${fetchErr?.message ?? "unknown"}` };
       }
 
-      // Update student record in public.students table with photo_path
-      const { data: updatedStudent, error: updateErr } = await supabaseAdmin
+      // Save photo_path into public.students
+      const { data: updated, error: updateErr } = await supabaseAdmin
         .from("students")
-        .update({
-          photo_path: data.photo_path,
-        })
+        .update({ photo_path: data.photo_path })
         .eq("id", data.student_id)
-        .select("id, ticket_id, photo_path")
+        .select("id, ticket_id, ticket_number, photo_path")
         .maybeSingle();
 
       if (updateErr) {
-        console.error("Update student photo error:", updateErr);
-        return { success: false, error: `Failed to save photo path in database: ${updateErr.message}` };
+        console.error("Update photo_path error:", updateErr);
+        return { success: false, error: `Failed to save photo in database: ${updateErr.message}` };
       }
+
+      const ticketId = updated?.ticket_id
+        ?? student.ticket_id
+        ?? `UTKARSH2026-${String(student.ticket_number ?? 1).padStart(4, "0")}`;
 
       return {
         success: true,
         entry: {
-          id: updatedStudent?.id || data.student_id,
-          ticket_number: updatedStudent?.ticket_id || student?.ticket_id || data.ticket_number,
+          id:            updated?.id ?? student.id,
+          ticket_number: ticketId,
         },
       };
     }
 
-    // ── LocalStore Fallback ──
+    // LocalStore Fallback
     const entries = localStore.getEntries();
-    if (entries.some((e) => e.student_id === data.student_id)) {
+    if (entries.some((e) => e.student_id === data.student_id))
       return { success: false, error: "You have already submitted an entry for this contest." };
-    }
 
     const newEntry = localStore.addEntry({
-      student_id: data.student_id,
-      ticket_number: data.ticket_number,
-      photo_url: data.photo_path,
-      display_name: data.display_name || "Participant",
-      college_name: data.college_name || "College",
+      student_id:      data.student_id,
+      ticket_number:   data.ticket_number,
+      photo_url:       data.photo_path,
+      display_name:    data.display_name || "Participant",
+      college_name:    data.college_name || "College",
       register_number: "REG",
-      contact_number: "0000000000",
-      status: "valid",
-      is_valid: true,
+      contact_number:  "0000000000",
+      status:          "valid",
+      is_valid:        true,
     });
-
     return { success: true, entry: newEntry };
   });
 
@@ -177,50 +173,50 @@ export const getStudentProfile = createServerFn({ method: "GET" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const { data: student } = await supabaseAdmin
+      const { data: student, error } = await supabaseAdmin
         .from("students")
-        .select("full_name, college_name, status, ticket_id, photo_path, created_at")
+        .select("full_name, college_name, status, ticket_id, ticket_number, photo_path, created_at")
         .eq("id", data.studentId)
         .maybeSingle();
 
-      if (!student) return { success: false, error: "Student not found." };
+      if (error || !student) return { success: false, error: "Student not found." };
 
       let photo_url: string | null = null;
       if (student.photo_path) {
-        if (student.photo_path.startsWith("http")) {
-          photo_url = student.photo_path;
-        } else {
-          const { data: pubData } = supabaseAdmin.storage
-            .from("contest-photos")
-            .getPublicUrl(student.photo_path);
-          photo_url = pubData?.publicUrl ?? null;
-        }
+        photo_url = student.photo_path.startsWith("http")
+          ? student.photo_path
+          : supabaseAdmin.storage.from("contest-photos").getPublicUrl(student.photo_path).data?.publicUrl ?? null;
       }
+
+      const ticketId = student.ticket_id
+        ?? `UTKARSH2026-${String(student.ticket_number ?? 1).padStart(4, "0")}`;
 
       return {
         success: true,
         student,
         entry: {
-          ticket_number: student.ticket_id || "UTKARSH2026",
+          ticket_number: ticketId,
           photo_url,
-          status: student.status,
-          submitted_at: student.created_at,
+          status:        student.status,
+          submitted_at:  student.created_at,
         },
       };
     }
 
     // LocalStore Fallback
     const students = localStore.getStudents();
-    const student = students.find((s: any) => s.id === data.studentId);
-    const entry = localStore.getEntries().find((e) => e.student_id === data.studentId);
+    const student  = students.find((s: any) => s.id === data.studentId);
+    const entry    = localStore.getEntries().find((e) => e.student_id === data.studentId);
     return {
       success: true,
       student: student || { full_name: "Student", college_name: "College", status: "active" },
-      entry: entry ? { ticket_number: entry.ticket_number, photo_url: entry.photo_url, status: entry.status, submitted_at: entry.submitted_at } : null,
+      entry:   entry
+        ? { ticket_number: entry.ticket_number, photo_url: entry.photo_url, status: entry.status, submitted_at: entry.submitted_at }
+        : null,
     };
   });
 
-/** Get paginated public gallery from public.students */
+/** Public gallery — all registered students from public.students */
 export const getGallery = createServerFn({ method: "GET" })
   .validator(z.object({ page: z.number().default(1), perPage: z.number().default(12) }))
   .handler(async ({ data }) => {
@@ -230,27 +226,25 @@ export const getGallery = createServerFn({ method: "GET" })
       const from = (data.page - 1) * data.perPage;
       const to   = from + data.perPage - 1;
 
-      const { data: studentsList, error, count } = await supabaseAdmin
+      const { data: rows, error, count } = await supabaseAdmin
         .from("students")
-        .select("id, ticket_id, ticket_number, photo_path, created_at, full_name, college_name", { count: "exact" })
+        .select("id, ticket_id, ticket_number, photo_path, created_at, full_name", { count: "exact" })
+        .not("photo_path", "is", null)
         .order("created_at", { ascending: false })
         .range(from, to);
 
       if (error) return { success: false, items: [], total: 0 };
 
-      const items = (studentsList ?? []).map((s: any) => {
-        let photo_url = s.photo_path;
-        if (s.photo_path && !s.photo_path.startsWith("http") && !s.photo_path.startsWith("data:")) {
-          const { data: pubData } = supabaseAdmin.storage
-            .from("contest-photos")
-            .getPublicUrl(s.photo_path);
-          photo_url = pubData?.publicUrl || s.photo_path;
+      const items = (rows ?? []).map((s: any) => {
+        let photo_url = s.photo_path ?? "";
+        if (photo_url && !photo_url.startsWith("http") && !photo_url.startsWith("data:")) {
+          photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(s.photo_path).data?.publicUrl ?? photo_url;
         }
         return {
           id:            s.id,
-          ticket_number: s.ticket_id || `UTKARSH2026-${String(s.ticket_number || 1).padStart(4, '0')}`,
-          photo_url:     photo_url || "",
-          display_name:  s.full_name || "Participant",
+          ticket_number: s.ticket_id ?? `UTKARSH2026-${String(s.ticket_number ?? 1).padStart(4, "0")}`,
+          photo_url,
+          display_name:  s.full_name ?? "Participant",
           submitted_at:  s.created_at,
         };
       });
@@ -260,18 +254,18 @@ export const getGallery = createServerFn({ method: "GET" })
 
     // LocalStore Fallback
     const entries = localStore.getEntries().filter((e) => e.is_valid && e.status === "valid");
-    const from = (data.page - 1) * data.perPage;
-    const items = entries.slice(from, from + data.perPage).map((e) => ({
-      id: e.id,
-      ticket_number: e.ticket_number,
-      photo_url: e.photo_url,
-      display_name: e.display_name,
-      submitted_at: e.submitted_at,
-    }));
-    return { success: true, items, total: entries.length };
+    const from    = (data.page - 1) * data.perPage;
+    return {
+      success: true,
+      items:   entries.slice(from, from + data.perPage).map((e) => ({
+        id: e.id, ticket_number: e.ticket_number, photo_url: e.photo_url,
+        display_name: e.display_name, submitted_at: e.submitted_at,
+      })),
+      total: entries.length,
+    };
   });
 
-/** Get live event stats */
+/** Live event counts */
 export const getStats = createServerFn({ method: "GET" })
   .handler(async () => {
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
@@ -279,63 +273,98 @@ export const getStats = createServerFn({ method: "GET" })
     if (isSupabaseConfigured && supabaseAdmin) {
       const { count: total } = await supabaseAdmin
         .from("students").select("*", { count: "exact", head: true });
-
-      const { count: valid } = await supabaseAdmin
-        .from("students").select("*", { count: "exact", head: true })
-        .not("photo_path", "is", null);
-
-      return {
-        success: true,
-        totalEntries: total ?? 0,
-        validEntries: valid && valid > 0 ? valid : (total ?? 0),
-      };
+      const { count: withPhoto } = await supabaseAdmin
+        .from("students").select("*", { count: "exact", head: true }).not("photo_path", "is", null);
+      return { success: true, totalEntries: total ?? 0, validEntries: withPhoto ?? 0 };
     }
 
-    // LocalStore Fallback
     const entries = localStore.getEntries();
-    const valid = entries.filter((e) => e.is_valid && e.status === "valid");
-    return {
-      success: true,
-      totalEntries: entries.length,
-      validEntries: valid.length,
-    };
+    return { success: true, totalEntries: entries.length, validEntries: entries.filter((e) => e.is_valid).length };
   });
 
-/** Get public winner (sanitized, no PII) */
+/** Public winner info */
 export const getPublicWinner = createServerFn({ method: "GET" })
   .handler(async () => {
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const { data: winner } = await supabaseAdmin
+      const { data: w } = await supabaseAdmin
         .from("winners")
-        .select("ticket_number, selected_at")
+        .select("ticket_number, selected_at, student_id")
         .order("selected_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (!winner) return { success: false, winner: null };
+      if (!w) return { success: false, winner: null };
+
+      let display_name = "Lucky Winner";
+      let photo_url    = "";
+      if (w.student_id) {
+        const { data: s } = await supabaseAdmin
+          .from("students")
+          .select("full_name, photo_path")
+          .eq("id", w.student_id)
+          .maybeSingle();
+        if (s) {
+          display_name = s.full_name ?? "Lucky Winner";
+          if (s.photo_path) {
+            photo_url = s.photo_path.startsWith("http")
+              ? s.photo_path
+              : supabaseAdmin.storage.from("contest-photos").getPublicUrl(s.photo_path).data?.publicUrl ?? "";
+          }
+        }
+      }
+
+      return { success: true, winner: { ticket_number: w.ticket_number, display_name, photo_url, selected_at: w.selected_at } };
+    }
+
+    return { success: true, winner: localStore.getWinner() };
+  });
+
+/** Notify Me — save notification preference for a student */
+export const subscribeNotification = createServerFn({ method: "POST" })
+  .validator(z.object({ student_id: z.string().optional(), college_email: z.string().email().optional() }))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
+
+    if (!data.student_id && !data.college_email)
+      return { success: false, error: "Please provide your registered email or student ID." };
+
+    if (isSupabaseConfigured && supabaseAdmin) {
+      // Find the student
+      let query = supabaseAdmin.from("students").select("id, notify_me").limit(1);
+      if (data.student_id) {
+        query = query.eq("id", data.student_id) as any;
+      } else {
+        query = query.eq("college_email", data.college_email!) as any;
+      }
+
+      const { data: student, error: fetchErr } = await (query as any).maybeSingle();
+
+      if (fetchErr || !student)
+        return { success: false, error: "No registered participant found with those details." };
+
+      if (student.notify_me)
+        return { success: true, already: true, message: "You're already on the notification list! We'll let you know once the winner is finalized. 🎉" };
+
+      const { error: updateErr } = await supabaseAdmin
+        .from("students").update({ notify_me: true }).eq("id", student.id);
+
+      if (updateErr)
+        return { success: false, error: `Could not save notification preference: ${updateErr.message}` };
 
       return {
         success: true,
-        winner: {
-          ticket_number: winner.ticket_number,
-          display_name:  "Lucky Winner",
-          college_name:  "",
-          photo_url:     "",
-          selected_at:   winner.selected_at,
-        },
+        already: false,
+        message: "You're all set! We'll notify you once the winner is finalized. Thank you for participating in Utkarsh 2026 Photo Booth Contest! 🎉",
       };
     }
 
-    // LocalStore Fallback
-    const winner = localStore.getWinner();
-    return { success: true, winner };
+    return { success: true, already: false, message: "You're all set! We'll notify you once the winner is finalized. 🎉" };
   });
 
 // ── Admin Functions ────────────────────────────────────
 
-/** Verify admin JWT token server-side */
 async function verifyAdmin(authHeader: string | null) {
   if (!authHeader?.startsWith("Bearer ")) return null;
   const token = authHeader.slice(7);
@@ -345,14 +374,12 @@ async function verifyAdmin(authHeader: string | null) {
     if (error || !user) return null;
     return user;
   }
-  // Mock token check
-  if (token.startsWith("mock_admin_token_")) {
+  if (token.startsWith("mock_admin_token_"))
     return { id: "admin_1", email: "admin@utkarsh2026.com" };
-  }
   return null;
 }
 
-/** Admin: get all student entries with search from public.students */
+/** Admin: list all student entries from public.students */
 export const adminGetEntries = createServerFn({ method: "POST" })
   .validator(z.object({
     token:  z.string(),
@@ -371,47 +398,48 @@ export const adminGetEntries = createServerFn({ method: "POST" })
 
       let query = supabaseAdmin
         .from("students")
-        .select(`
-          id, ticket_id, ticket_number, status, created_at, photo_path,
-          full_name, college_name, register_number, college_email, contact_number
-        `, { count: "exact" })
+        .select(
+          "id, ticket_id, ticket_number, status, created_at, photo_path, full_name, college_name, register_number, college_email, contact_number",
+          { count: "exact" }
+        )
         .order("created_at", { ascending: false })
         .range(from, from + 19);
 
-      if (data.status !== "all") {
-        if (data.status === "valid") {
-          query = query.or("status.eq.active,status.eq.valid");
-        } else if (data.status === "rejected") {
-          query = query.eq("status", "disqualified");
-        } else {
-          query = query.eq("status", data.status);
-        }
+      if (data.status === "valid") {
+        query = (query as any).in("status", ["active", "valid"]);
+      } else if (data.status === "rejected") {
+        query = (query as any).eq("status", "disqualified");
       }
+      // "pending" and "all" — no extra filter
+
       if (data.search) {
-        query = query.or(
-          `ticket_id.ilike.%${data.search}%,full_name.ilike.%${data.search}%,register_number.ilike.%${data.search}%,college_email.ilike.%${data.search}%`
+        const s = data.search;
+        query = (query as any).or(
+          `ticket_id.ilike.%${s}%,full_name.ilike.%${s}%,register_number.ilike.%${s}%,college_email.ilike.%${s}%`
         );
       }
 
-      const { data: studentsList, error, count } = await query;
+      const { data: rows, error, count } = await (query as any);
       if (error) return { success: false, error: error.message };
 
-      const items = (studentsList ?? []).map((s: any) => {
-        let photo_url = s.photo_path;
-        if (s.photo_path && !s.photo_path.startsWith("data:") && !s.photo_path.startsWith("http")) {
-          const { data: pubData } = supabaseAdmin.storage
-            .from("contest-photos")
-            .getPublicUrl(s.photo_path);
-          photo_url = pubData?.publicUrl || s.photo_path;
+      const items = (rows ?? []).map((s: any) => {
+        let photo_url: string | null = s.photo_path ?? null;
+        if (photo_url && !photo_url.startsWith("http") && !photo_url.startsWith("data:")) {
+          photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(s.photo_path).data?.publicUrl ?? photo_url;
         }
+
+        const displayStatus = s.status === "disqualified" ? "rejected"
+          : (s.status === "active" || s.status === "valid") ? "valid"
+          : (s.status ?? "valid");
+
         return {
           id:            s.id,
-          ticket_number: s.ticket_id || `UTKARSH2026-${String(s.ticket_number || 1).padStart(4, '0')}`,
-          status:        s.status === "disqualified" ? "rejected" : (s.status || "valid"),
-          is_valid:      true,
+          ticket_number: s.ticket_id ?? `UTKARSH2026-${String(s.ticket_number ?? 1).padStart(4, "0")}`,
+          status:        displayStatus,
+          is_valid:      displayStatus === "valid",
           submitted_at:  s.created_at,
-          photo_path:    s.photo_path,
-          photo_url:     photo_url || null,
+          photo_path:    s.photo_path ?? null,
+          photo_url,
           students: {
             full_name:       s.full_name,
             college_name:    s.college_name,
@@ -427,44 +455,34 @@ export const adminGetEntries = createServerFn({ method: "POST" })
 
     // LocalStore Fallback
     let entries = localStore.getEntries();
-    if (data.status !== "all") {
-      entries = entries.filter((e) => e.status === data.status);
-    }
+    if (data.status !== "all") entries = entries.filter((e) => e.status === data.status);
     if (data.search) {
       const q = data.search.toLowerCase();
-      entries = entries.filter(
-        (e) =>
-          e.ticket_number.toLowerCase().includes(q) ||
-          e.display_name.toLowerCase().includes(q) ||
-          e.register_number.toLowerCase().includes(q)
+      entries = entries.filter((e) =>
+        e.ticket_number.toLowerCase().includes(q) ||
+        e.display_name.toLowerCase().includes(q) ||
+        e.register_number.toLowerCase().includes(q)
       );
     }
-
     const formatted = entries.map((e) => ({
-      id: e.id,
-      ticket_number: e.ticket_number,
-      status: e.status,
-      is_valid: e.is_valid,
-      submitted_at: e.submitted_at,
-      photo_path: e.photo_url,
+      id: e.id, ticket_number: e.ticket_number, status: e.status, is_valid: e.is_valid,
+      submitted_at: e.submitted_at, photo_path: e.photo_url, photo_url: e.photo_url,
       students: {
-        full_name: e.display_name,
-        college_name: e.college_name,
+        full_name: e.display_name, college_name: e.college_name,
         register_number: e.register_number,
         college_email: `${e.display_name.toLowerCase().replace(/\s+/g, ".")}@college.edu`,
         contact_number: e.contact_number,
       },
     }));
-
     return { success: true, entries: formatted, total: formatted.length };
   });
 
-/** Admin: approve or reject a student entry */
+/** Admin: approve or reject a student */
 export const adminUpdateEntry = createServerFn({ method: "POST" })
   .validator(z.object({
-    token:    z.string(),
-    entryId:  z.string(),
-    status:   z.enum(["valid", "rejected", "pending"]),
+    token:   z.string(),
+    entryId: z.string(),
+    status:  z.enum(["valid", "rejected", "pending"]),
   }))
   .handler(async ({ data }) => {
     const admin = await verifyAdmin(`Bearer ${data.token}`);
@@ -473,31 +491,23 @@ export const adminUpdateEntry = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const dbStatus = data.status === "rejected" ? "disqualified" : "active";
+      // Map UI status to DB status
+      const dbStatus = data.status === "rejected" ? "disqualified"
+        : data.status === "valid" ? "active"
+        : "pending";
+
       const { error } = await supabaseAdmin
-        .from("students")
-        .update({
-          status: dbStatus,
-        })
-        .eq("id", data.entryId);
+        .from("students").update({ status: dbStatus }).eq("id", data.entryId);
 
       if (error) return { success: false, error: error.message };
-
-      await supabaseAdmin.from("audit_logs").insert({
-        admin_id: admin.id,
-        action:   `STUDENT_STATUS_CHANGED_TO_${data.status.toUpperCase()}`,
-        metadata: { student_id: data.entryId },
-      });
-
       return { success: true };
     }
 
-    // LocalStore Fallback
     localStore.updateEntryStatus(data.entryId, data.status);
     return { success: true };
   });
 
-/** Admin: delete student record */
+/** Admin: delete student record AND remove their photo from storage */
 export const adminDeleteEntry = createServerFn({ method: "POST" })
   .validator(z.object({
     token:   z.string(),
@@ -510,28 +520,37 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const { error } = await supabaseAdmin
-        .from("students")
-        .delete()
-        .eq("id", data.entryId);
+      // 1. Fetch the student row to get their photo_path
+      const { data: student, error: fetchErr } = await supabaseAdmin
+        .from("students").select("id, photo_path").eq("id", data.entryId).maybeSingle();
 
-      if (error) return { success: false, error: error.message };
+      if (fetchErr) return { success: false, error: `Failed to fetch student: ${fetchErr.message}` };
 
-      await supabaseAdmin.from("audit_logs").insert({
-        admin_id: admin.id,
-        action:   "STUDENT_DELETED",
-        metadata: { student_id: data.entryId },
-      });
+      // 2. Delete storage object if a photo exists
+      if (student?.photo_path) {
+        const storagePath = storagePathFromUrl(student.photo_path) ?? student.photo_path;
+        const { error: storageErr } = await supabaseAdmin.storage
+          .from("contest-photos").remove([storagePath]);
+        if (storageErr) {
+          console.error("Storage delete error:", storageErr);
+          // Don't abort — attempt DB delete anyway but surface the warning
+        }
+      }
+
+      // 3. Delete the student row
+      const { error: deleteErr } = await supabaseAdmin
+        .from("students").delete().eq("id", data.entryId);
+
+      if (deleteErr) return { success: false, error: `Failed to delete student record: ${deleteErr.message}` };
 
       return { success: true };
     }
 
-    // LocalStore Fallback
     localStore.deleteEntry(data.entryId);
     return { success: true };
   });
 
-/** Admin: execute lucky draw directly from public.students */
+/** Admin: execute lucky draw from public.students */
 export const adminExecuteDraw = createServerFn({ method: "POST" })
   .validator(z.object({ token: z.string() }))
   .handler(async ({ data }) => {
@@ -541,89 +560,77 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      // 1. Check if winner already exists in winners table
-      const { data: existingWinner } = await supabaseAdmin
-        .from("winners")
-        .select("ticket_number, selected_at")
-        .limit(1)
-        .maybeSingle();
+      // Check for existing winner
+      const { data: existingWinner, error: winCheckErr } = await supabaseAdmin
+        .from("winners").select("ticket_number, selected_at").limit(1).maybeSingle();
 
-      if (existingWinner) {
+      if (existingWinner)
         return { success: false, error: "Lucky draw has already been executed. A winner exists." };
-      }
 
-      // 2. Query valid students from public.students
-      const { data: allStudents, error } = await supabaseAdmin
+      // Pull eligible pool: students with photos first, else all active
+      const { data: withPhotos, error: err1 } = await supabaseAdmin
+        .from("students")
+        .select("id, full_name, college_name, photo_path, ticket_id, ticket_number")
+        .not("photo_path", "is", null)
+        .neq("status", "disqualified");
+
+      const { data: allActive, error: err2 } = await supabaseAdmin
         .from("students")
         .select("id, full_name, college_name, photo_path, ticket_id, ticket_number")
         .neq("status", "disqualified");
 
-      if (error || !allStudents || allStudents.length === 0) {
+      if ((err1 && err2) || (!withPhotos?.length && !allActive?.length))
         return { success: false, error: "No valid registered students found for the lucky draw." };
+
+      const pool = (withPhotos && withPhotos.length > 0) ? withPhotos : (allActive ?? []);
+      const chosen = pool[Math.floor(Math.random() * pool.length)];
+
+      const ticketNum = chosen.ticket_id
+        ?? `UTKARSH2026-${String(chosen.ticket_number ?? 1).padStart(4, "0")}`;
+
+      let photo_url = chosen.photo_path ?? "";
+      if (photo_url && !photo_url.startsWith("http")) {
+        photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(photo_url).data?.publicUrl ?? photo_url;
       }
 
-      // Filter for students with photos, or fallback to all registered students
-      const photoStudents = allStudents.filter((s: any) => Boolean(s.photo_path));
-      const pool = photoStudents.length > 0 ? photoStudents : allStudents;
-
-      const randomIndex = Math.floor(Math.random() * pool.length);
-      const chosen = pool[randomIndex];
-
-      const ticketNum = chosen.ticket_id || `UTKARSH2026-${String(chosen.ticket_number || 1).padStart(4, '0')}`;
-
-      let photo_url = chosen.photo_path;
-      if (chosen.photo_path && !chosen.photo_path.startsWith("http")) {
-        const { data: pubData } = supabaseAdmin.storage
-          .from("contest-photos")
-          .getPublicUrl(chosen.photo_path);
-        photo_url = pubData?.publicUrl || chosen.photo_path;
-      }
-
-      // Record winner in winners table
+      // Persist winner to Supabase winners table
       await supabaseAdmin.from("winners").insert({
+        student_id:    chosen.id,
         ticket_number: ticketNum,
+        selected_at:   new Date().toISOString(),
       });
 
-      const winner = {
-        ticket_number: ticketNum,
-        display_name:  chosen.full_name,
-        college_name:  chosen.college_name,
-        photo_path:    photo_url || "",
-        selected_at:   new Date().toISOString(),
-        total_entries: pool.length,
+      return {
+        success: true,
+        winner: {
+          ticket_number: ticketNum,
+          display_name:  chosen.full_name,
+          college_name:  chosen.college_name,
+          photo_path:    photo_url,
+          selected_at:   new Date().toISOString(),
+          total_entries: pool.length,
+        },
       };
-
-      return { success: true, winner };
     }
 
     // LocalStore Fallback
     const existingWinner = localStore.getWinner();
-    if (existingWinner) {
-      return { success: false, error: "Lucky draw has already been executed. A winner exists." };
-    }
+    if (existingWinner) return { success: false, error: "Lucky draw has already been executed." };
 
     const validEntries = localStore.getEntries().filter((e) => e.is_valid && e.status === "valid");
-    if (validEntries.length === 0) {
-      return { success: false, error: "No valid entries found for the lucky draw." };
-    }
+    if (validEntries.length === 0) return { success: false, error: "No valid entries found for the lucky draw." };
 
-    const randomIndex = Math.floor(Math.random() * validEntries.length);
-    const chosen = validEntries[randomIndex];
-
+    const chosen  = validEntries[Math.floor(Math.random() * validEntries.length)];
     const winner: any = {
-      ticket_number: chosen.ticket_number,
-      display_name:  chosen.display_name,
-      college_name:  chosen.college_name,
-      photo_url:     chosen.photo_url,
-      selected_at:   new Date().toISOString(),
-      total_entries: validEntries.length,
+      ticket_number: chosen.ticket_number, display_name: chosen.display_name,
+      college_name: chosen.college_name, photo_url: chosen.photo_url,
+      selected_at: new Date().toISOString(), total_entries: validEntries.length,
     };
-
     localStore.setWinner(winner);
     return { success: true, winner };
   });
 
-/** Admin: get dashboard summary stats directly from public.students */
+/** Admin: dashboard stats from public.students */
 export const adminGetStats = createServerFn({ method: "POST" })
   .validator(z.object({ token: z.string() }))
   .handler(async ({ data }) => {
@@ -633,18 +640,20 @@ export const adminGetStats = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const [allRes, photoRes, disqualifiedRes, winnerRes] = await Promise.all([
+      const [allRes, photoRes, disqRes, winnerRes] = await Promise.all([
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }),
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }).not("photo_path", "is", null),
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }).eq("status", "disqualified"),
         supabaseAdmin.from("winners").select("ticket_number, selected_at").limit(1).maybeSingle(),
       ]);
 
-      const totalStudents = allRes.count ?? 0;
-      const photoCount    = photoRes.count ?? 0;
-      const rejectedCount = disqualifiedRes.count ?? 0;
-      const validCount    = photoCount > 0 ? photoCount : (totalStudents - rejectedCount);
-      const pendingCount  = Math.max(0, totalStudents - validCount - rejectedCount);
+      const totalStudents = allRes.count    ?? 0;
+      const photoCount    = photoRes.count  ?? 0;
+      const rejectedCount = disqRes.count   ?? 0;
+      // "valid" = students who have uploaded a photo AND are not disqualified
+      const validCount    = photoCount;
+      // "pending" = registered but no photo yet and not disqualified
+      const pendingCount  = Math.max(0, totalStudents - photoCount - rejectedCount);
 
       return {
         success: true,
@@ -661,20 +670,19 @@ export const adminGetStats = createServerFn({ method: "POST" })
     }
 
     // LocalStore Fallback
-    const entries = localStore.getEntries();
+    const entries  = localStore.getEntries();
     const students = localStore.getStudents();
-    const winner = localStore.getWinner();
-
+    const winner   = localStore.getWinner();
     return {
       success: true,
       stats: {
-        total: entries.length,
-        valid: entries.filter((e) => e.status === "valid").length,
-        pending: entries.filter((e) => e.status === "pending").length,
+        total:    entries.length,
+        valid:    entries.filter((e) => e.status === "valid").length,
+        pending:  entries.filter((e) => e.status === "pending").length,
         rejected: entries.filter((e) => e.status === "rejected").length,
         students: Math.max(students.length, entries.length),
         drawDone: !!winner,
-        winner: winner ? { ticket_number: winner.ticket_number, selected_at: winner.selected_at } : null,
+        winner:   winner ? { ticket_number: winner.ticket_number, selected_at: winner.selected_at } : null,
       },
     };
   });
