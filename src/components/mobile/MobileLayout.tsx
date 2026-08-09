@@ -7,7 +7,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   Camera, Upload, Trophy, Gift, Users, Clock,
-  Home, Image, Ticket, Star, Menu, X, ChevronRight,
+  Home, Ticket, Star, Menu, X, ChevronRight,
   Instagram, Facebook, Youtube, Mail, Send, QrCode,
   ArrowRight, Sparkles, Heart,
 } from "lucide-react";
@@ -16,38 +16,26 @@ import heroBg from "@/assets/hero-bg.jpg";
 import trophy from "@/assets/trophy.png";
 import giftbox from "@/assets/giftbox.png";
 
-// Gallery images (will be replaced by real Supabase data once connected)
-import g1 from "@/assets/g1.jpg";
-import g2 from "@/assets/g2.jpg";
-import g3 from "@/assets/g3.jpg";
-import g4 from "@/assets/g4.jpg";
 
-import { getGallery, createEntry, getStats } from "@/lib/server-fns";
+import { getStats } from "@/lib/server-fns";
 import { localStore } from "@/lib/local-store";
 import { useCountdown, CountdownBoxes, pad } from "@/components/site/Countdown";
 
 // ── Bottom Nav Items ──────────────────────────────────
 const BOTTOM_NAV = [
   { id: "home",     label: "Home",    icon: Home,   href: "#m-home" },
-  { id: "gallery",  label: "Gallery", icon: Image,  href: "#m-gallery" },
   { id: "upload",   label: "Upload",  icon: Camera, href: "#m-upload", cta: true },
   { id: "winners",  label: "Winners", icon: Trophy, href: "#m-winners" },
   { id: "contact",  label: "Contact", icon: Mail,   href: "#m-contact" },
 ];
 
-const DEFAULT_MOBILE_GALLERY = [
-  { src: g1, id: "UTKARSH2026-0001", name: "Ananya R." },
-  { src: g2, id: "UTKARSH2026-0002", name: "Rahul K."  },
-  { src: g3, id: "UTKARSH2026-0003", name: "Sneha P."  },
-  { src: g4, id: "UTKARSH2026-0004", name: "Aditya V." },
-];
+
 
 // ── Main Component ────────────────────────────────────
 export function MobileLayout() {
   const navigate = useNavigate();
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [activeNav, setActiveNav] = useState("home");
-  const [mobileGallery, setMobileGallery] = useState<any[]>(DEFAULT_MOBILE_GALLERY);
   const [totalEntries, setTotalEntries]   = useState(() => localStore.getEntries().length);
   const t = useCountdown();
 
@@ -61,19 +49,6 @@ export function MobileLayout() {
   };
 
   const loadMobileData = async () => {
-    const res = await getGallery({ data: { page: 1, perPage: 10 } });
-    if (res.success && res.items && res.items.length > 0) {
-      setMobileGallery(res.items);
-    } else {
-      const local = localStore.getEntries().map((e) => ({
-        id: e.id,
-        ticket_number: e.ticket_number,
-        photo_url: e.photo_url,
-        display_name: e.display_name,
-      }));
-      setMobileGallery(local);
-    }
-
     const statsRes = await getStats();
     if (statsRes.success) {
       setTotalEntries(statsRes.totalEntries || localStore.getEntries().length);
@@ -89,7 +64,6 @@ export function MobileLayout() {
   const NAV_LINKS = [
     { label: "Home",         href: "#m-home" },
     { label: "How It Works", href: "#m-how-it-works" },
-    { label: "Gallery",      href: "#m-gallery" },
     { label: "Winners",      href: "#m-winners" },
     { label: "Contact",      href: "#m-contact" },
   ];
@@ -288,35 +262,7 @@ export function MobileLayout() {
           </div>
         </section>
 
-        {/* ── LIVE GALLERY ── */}
-        <section id="m-gallery" className="pb-4">
-          <div className="px-4 mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-black tracking-wide">LIVE GALLERY</h2>
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-neon-pink">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-pink" /> Live
-              </span>
-            </div>
-            <Link to="/gallery" className="text-[12px] text-neon-purple hover:text-neon-pink transition-colors">
-              View All →
-            </Link>
-          </div>
-
-          {/* Horizontal scroll gallery */}
-          <div className="flex gap-3 overflow-x-auto scrollbar-none px-4 pb-2 snap-x snap-mandatory">
-            {mobileGallery.map((p) => (
-              <figure key={p.id || p.ticket_number}
-                className="flex-none w-36 snap-start overflow-hidden rounded-xl border border-border bg-panel">
-                <img src={p.photo_url || p.src} alt={p.display_name || p.name}
-                  className="h-40 w-full object-cover" />
-                <figcaption className="px-2 py-2">
-                  <p className="text-[10px] font-semibold text-neon-pink truncate">{p.ticket_number || p.id}</p>
-                  <p className="text-[9px] text-muted-foreground">{p.display_name || p.name}</p>
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-        </section>
+        {/* Gallery removed — visible only to admin in admin portal */}
 
         {/* ── LUCKY DRAW / GOLDEN TICKET ── */}
         <section className="px-4 pb-4">

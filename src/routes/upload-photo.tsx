@@ -297,10 +297,7 @@ function UploadPhotoPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Link to="/gallery" className="btn-neon rounded-full px-8 py-3 text-xs font-black">
-                View Live Gallery →
-              </Link>
-              <Link to="/" className="btn-outline-neon border rounded-full px-6 py-3 text-xs font-semibold">
+              <Link to="/" className="btn-neon rounded-full px-8 py-3 text-xs font-black">
                 Back to Home
               </Link>
             </div>

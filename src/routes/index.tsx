@@ -29,12 +29,7 @@ import utkarshLogoFont from "@/assets/utkarsh-logo-font.jpg";
 import trophy from "@/assets/trophy.png";
 import goldenTicket from "@/assets/golden-ticket.png";
 import giftbox from "@/assets/giftbox.png";
-import g1 from "@/assets/g1.jpg";
-import g2 from "@/assets/g2.jpg";
-import g3 from "@/assets/g3.jpg";
-import g4 from "@/assets/g4.jpg";
-import g5 from "@/assets/g5.jpg";
-import g6 from "@/assets/g6.jpg";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -61,19 +56,11 @@ export const Route = createFileRoute("/")({
 const NAV: { label: string; href: string }[] = [
   { label: "Home",         href: "#home" },
   { label: "How It Works", href: "#how-it-works" },
-  { label: "Gallery",      href: "#gallery" },
   { label: "Winners",      href: "#winners" },
   { label: "Contact",      href: "#contact" },
 ];
 
-const GALLERY = [
-  { src: g1, id: "FEST26-0001", name: "Ananya R."    },
-  { src: g2, id: "FEST26-0002", name: "Rahul K."     },
-  { src: g3, id: "FEST26-0003", name: "Sneha P."     },
-  { src: g4, id: "FEST26-0004", name: "Aditya V."    },
-  { src: g5, id: "FEST26-0005", name: "Meera & Diya" },
-  { src: g6, id: "FEST26-0006", name: "Kiran M."     },
-];
+
 
 const STEPS = [
   {
@@ -100,14 +87,13 @@ const STEPS = [
 
 import { MobileLayout } from "@/components/mobile/MobileLayout";
 import { useEffect } from "react";
-import { getGallery, getStats } from "@/lib/server-fns";
+import { getStats } from "@/lib/server-fns";
 import { localStore } from "@/lib/local-store";
 
 function Index() {
   const navigate = useNavigate();
   const t = useCountdown();
   const [email, setEmail] = useState("");
-  const [liveGallery, setLiveGallery] = useState<any[]>(GALLERY);
   const [totalEntries, setTotalEntries] = useState<number>(0);
 
   const handleUploadClick = () => {
@@ -121,21 +107,7 @@ function Index() {
 
   useEffect(() => {
     const load = async () => {
-      // 1. Fetch gallery
-      const res = await getGallery({ data: { page: 1, perPage: 6 } });
-      if (res.success && res.items && res.items.length > 0) {
-        setLiveGallery(res.items);
-      } else {
-        const local = localStore.getEntries().slice(0, 6).map((e) => ({
-          id: e.id,
-          ticket_number: e.ticket_number,
-          photo_url: e.photo_url,
-          display_name: e.display_name,
-        }));
-        setLiveGallery(local);
-      }
-
-      // 2. Fetch stats count dynamically
+      // Fetch stats count dynamically
       const statsRes = await getStats();
       if (statsRes.success) {
         setTotalEntries(statsRes.totalEntries);
@@ -364,52 +336,8 @@ function Index() {
         </div>
       </section>
 
-      {/* Gallery */}
-      <section id="gallery" className="mx-auto max-w-[1240px] px-5 pb-8">
-        <div className="panel p-7">
-          <div className="flex flex-wrap items-center gap-4">
-            <div>
-              <h2 className="flex items-center gap-3 text-lg font-bold tracking-wide">
-                LIVE GALLERY
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-neon-pink">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-neon-pink icon-glow-pink" />
-                  Live
-                </span>
-              </h2>
-              <p className="mt-1 text-[12px] text-muted-foreground">
-                Check out the amazing clicks from the fest!
-              </p>
-            </div>
-            <Link
-              to="/gallery"
-              className="ml-auto inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-xs sm:px-5 sm:py-2.5 sm:text-sm btn-outline-neon"
-            >
-              View All Photos <ArrowRight className="h-4 w-4 text-neon-purple icon-glow-purple" />
-            </Link>
-          </div>
+      {/* Gallery removed — visible only to admin in admin portal */}
 
-          <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            {liveGallery.map((p) => (
-              <figure key={p.id || p.ticket_number} className="overflow-hidden rounded-xl border border-border">
-                <div className="relative">
-                  <img
-                    src={p.photo_url || p.src}
-                    alt={`Fest entry by ${p.display_name || p.name}`}
-                    loading="lazy"
-                    width={512}
-                    height={640}
-                    className="h-44 w-full object-cover"
-                  />
-                </div>
-                <figcaption className="bg-panel px-3 py-2.5">
-                  <p className="text-[12px] font-semibold text-neon-pink">{p.ticket_number || p.id}</p>
-                  <p className="text-[11px] text-muted-foreground">{p.display_name || p.name}</p>
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-        </div>
-      </section>
 
       {/* Lucky draw + winner reveal */}
       <section id="winners" className="mx-auto grid max-w-[1240px] gap-5 px-5 pb-8 lg:grid-cols-2">

@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { ArrowLeft, Upload, Search, Camera } from "lucide-react";
+import { ArrowLeft, Search, Camera } from "lucide-react";
 import utkarshLogoFont from "@/assets/utkarsh-logo-font.jpg";
 import { getGallery } from "@/lib/server-fns";
 import { localStore } from "@/lib/local-store";
@@ -19,6 +19,16 @@ function GalleryPage() {
   const navigate = useNavigate();
   const [photos, setPhotos] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+
+  // ── Admin-only guard ──
+  useEffect(() => {
+    const session = typeof window !== "undefined"
+      ? localStorage.getItem("utkarsh_admin_session")
+      : null;
+    if (!session) {
+      navigate({ to: "/admin-login" });
+    }
+  }, [navigate]);
 
   const loadPhotos = async () => {
     const res = await getGallery({ data: { page: 1, perPage: 100 } });
@@ -40,15 +50,6 @@ function GalleryPage() {
   useEffect(() => {
     loadPhotos();
   }, []);
-
-  const handleUploadClick = () => {
-    const studentId = typeof window !== "undefined" ? sessionStorage.getItem("studentId") : null;
-    if (!studentId) {
-      navigate({ to: "/register" });
-    } else {
-      navigate({ to: "/upload-photo" });
-    }
-  };
 
   const filtered = photos.filter(
     (p) =>
@@ -80,13 +81,12 @@ function GalleryPage() {
             />
           </div>
 
-          <button
-            onClick={handleUploadClick}
+          <Link
+            to="/admin"
             className="hidden sm:inline-flex shrink-0 items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold btn-neon"
           >
-            <Upload className="h-4 w-4 icon-glow-pink" />
-            Upload Photo
-          </button>
+            Admin Dashboard
+          </Link>
 
           <Link
             to="/"
@@ -148,20 +148,19 @@ function GalleryPage() {
           </div>
         )}
 
-        {/* Upload CTA */}
-        <div className="mt-12 flex flex-col items-center gap-4 rounded-2xl border border-neon-pink/30 bg-secondary/30 p-8 text-center">
-          <Camera className="h-10 w-10 text-neon-pink icon-glow-pink" />
+        {/* Back to admin */}
+        <div className="mt-12 flex flex-col items-center gap-4 rounded-2xl border border-neon-purple/30 bg-secondary/30 p-8 text-center">
+          <Camera className="h-10 w-10 text-neon-purple icon-glow-purple" />
           <div>
-            <p className="text-lg font-bold">Add your photo to the gallery!</p>
-            <p className="mt-1 text-sm text-muted-foreground">One photo per person. Make it your best shot.</p>
+            <p className="text-lg font-bold">Admin Gallery View</p>
+            <p className="mt-1 text-sm text-muted-foreground">This gallery is visible only to admins.</p>
           </div>
-          <button
-            onClick={handleUploadClick}
+          <Link
+            to="/admin"
             className="inline-flex items-center gap-2 rounded-full px-8 py-3.5 text-sm font-semibold btn-neon"
           >
-            <Upload className="h-4 w-4 icon-glow-pink" />
-            Upload Your Photo
-          </button>
+            Back to Dashboard
+          </Link>
         </div>
       </main>
     </div>
