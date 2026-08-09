@@ -119,14 +119,10 @@ export const createEntry = createServerFn({ method: "POST" })
         .from("students")
         .select("id, ticket_id, photo_path")
         .eq("id", data.student_id)
-        .single();
+        .maybeSingle();
 
       if (fetchErr || !student) {
         return { success: false, error: "Student record not found." };
-      }
-
-      if (student.photo_path) {
-        return { success: false, error: "You have already uploaded a photo for this contest." };
       }
 
       // Update student record in public.students table with photo_path
@@ -148,7 +144,7 @@ export const createEntry = createServerFn({ method: "POST" })
         success: true,
         entry: {
           id: updatedStudent?.id || data.student_id,
-          ticket_number: updatedStudent?.ticket_id || student.ticket_id || data.ticket_number,
+          ticket_number: updatedStudent?.ticket_id || student?.ticket_id || data.ticket_number,
         },
       };
     }
@@ -185,7 +181,7 @@ export const getStudentProfile = createServerFn({ method: "GET" })
         .from("students")
         .select("full_name, college_name, status, ticket_id, photo_path, created_at")
         .eq("id", data.studentId)
-        .single();
+        .maybeSingle();
 
       if (!student) return { success: false, error: "Student not found." };
 
@@ -204,14 +200,12 @@ export const getStudentProfile = createServerFn({ method: "GET" })
       return {
         success: true,
         student,
-        entry: student.photo_path
-          ? {
-              ticket_number: student.ticket_id || "UTKARSH2026",
-              photo_url,
-              status: student.status,
-              submitted_at: student.created_at,
-            }
-          : null,
+        entry: {
+          ticket_number: student.ticket_id || "UTKARSH2026",
+          photo_url,
+          status: student.status,
+          submitted_at: student.created_at,
+        },
       };
     }
 
@@ -238,8 +232,7 @@ export const getGallery = createServerFn({ method: "GET" })
 
       const { data: studentsList, error, count } = await supabaseAdmin
         .from("students")
-        .select("id, ticket_id, photo_path, created_at, full_name, college_name", { count: "exact" })
-        .not("photo_path", "is", null)
+        .select("id, ticket_id, ticket_number, photo_path, created_at, full_name, college_name", { count: "exact" })
         .order("created_at", { ascending: false })
         .range(from, to);
 
@@ -255,7 +248,7 @@ export const getGallery = createServerFn({ method: "GET" })
         }
         return {
           id:            s.id,
-          ticket_number: s.ticket_id || "UTKARSH2026",
+          ticket_number: s.ticket_id || `UTKARSH2026-${String(s.ticket_number || 1).padStart(4, '0')}`,
           photo_url:     photo_url || "",
           display_name:  s.full_name || "Participant",
           submitted_at:  s.created_at,
@@ -294,7 +287,7 @@ export const getStats = createServerFn({ method: "GET" })
       return {
         success: true,
         totalEntries: total ?? 0,
-        validEntries: valid ?? 0,
+        validEntries: valid && valid > 0 ? valid : (total ?? 0),
       };
     }
 
@@ -316,34 +309,20 @@ export const getPublicWinner = createServerFn({ method: "GET" })
     if (isSupabaseConfigured && supabaseAdmin) {
       const { data: winner } = await supabaseAdmin
         .from("winners")
-        .select(`
-          ticket_number,
-          selected_at,
-          students!inner(photo_path, full_name, college_name)
-        `)
+        .select("ticket_number, selected_at")
         .order("selected_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (!winner) return { success: false, winner: null };
 
-      const student = (winner as any).students;
-
-      let photo_url = student?.photo_path;
-      if (student?.photo_path && !student.photo_path.startsWith("http")) {
-        const { data: pubData } = supabaseAdmin.storage
-          .from("contest-photos")
-          .getPublicUrl(student.photo_path);
-        photo_url = pubData?.publicUrl || student.photo_path;
-      }
-
       return {
         success: true,
         winner: {
           ticket_number: winner.ticket_number,
-          display_name:  student?.full_name   ?? "Winner",
-          college_name:  student?.college_name ?? "",
-          photo_url:     photo_url ?? "",
+          display_name:  "Lucky Winner",
+          college_name:  "",
+          photo_url:     "",
           selected_at:   winner.selected_at,
         },
       };
@@ -373,7 +352,7 @@ async function verifyAdmin(authHeader: string | null) {
   return null;
 }
 
-/** Admin: get all student photo uploads with search */
+/** Admin: get all student entries with search from public.students */
 export const adminGetEntries = createServerFn({ method: "POST" })
   .validator(z.object({
     token:  z.string(),
@@ -393,19 +372,24 @@ export const adminGetEntries = createServerFn({ method: "POST" })
       let query = supabaseAdmin
         .from("students")
         .select(`
-          id, ticket_id, status, created_at, photo_path,
+          id, ticket_id, ticket_number, status, created_at, photo_path,
           full_name, college_name, register_number, college_email, contact_number
         `, { count: "exact" })
-        .not("photo_path", "is", null)
         .order("created_at", { ascending: false })
         .range(from, from + 19);
 
       if (data.status !== "all") {
-        query = query.eq("status", data.status);
+        if (data.status === "valid") {
+          query = query.or("status.eq.active,status.eq.valid");
+        } else if (data.status === "rejected") {
+          query = query.eq("status", "disqualified");
+        } else {
+          query = query.eq("status", data.status);
+        }
       }
       if (data.search) {
         query = query.or(
-          `ticket_id.ilike.%${data.search}%,full_name.ilike.%${data.search}%,register_number.ilike.%${data.search}%`
+          `ticket_id.ilike.%${data.search}%,full_name.ilike.%${data.search}%,register_number.ilike.%${data.search}%,college_email.ilike.%${data.search}%`
         );
       }
 
@@ -422,12 +406,12 @@ export const adminGetEntries = createServerFn({ method: "POST" })
         }
         return {
           id:            s.id,
-          ticket_number: s.ticket_id || "UTKARSH2026",
-          status:        s.status || "valid",
+          ticket_number: s.ticket_id || `UTKARSH2026-${String(s.ticket_number || 1).padStart(4, '0')}`,
+          status:        s.status === "disqualified" ? "rejected" : (s.status || "valid"),
           is_valid:      true,
           submitted_at:  s.created_at,
           photo_path:    s.photo_path,
-          photo_url,
+          photo_url:     photo_url || null,
           students: {
             full_name:       s.full_name,
             college_name:    s.college_name,
@@ -475,7 +459,7 @@ export const adminGetEntries = createServerFn({ method: "POST" })
     return { success: true, entries: formatted, total: formatted.length };
   });
 
-/** Admin: approve or reject a student photo */
+/** Admin: approve or reject a student entry */
 export const adminUpdateEntry = createServerFn({ method: "POST" })
   .validator(z.object({
     token:    z.string(),
@@ -489,10 +473,11 @@ export const adminUpdateEntry = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
+      const dbStatus = data.status === "rejected" ? "disqualified" : "active";
       const { error } = await supabaseAdmin
         .from("students")
         .update({
-          status: data.status,
+          status: dbStatus,
         })
         .eq("id", data.entryId);
 
@@ -512,7 +497,7 @@ export const adminUpdateEntry = createServerFn({ method: "POST" })
     return { success: true };
   });
 
-/** Admin: delete photo permanently */
+/** Admin: delete student record */
 export const adminDeleteEntry = createServerFn({ method: "POST" })
   .validator(z.object({
     token:   z.string(),
@@ -527,14 +512,14 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
     if (isSupabaseConfigured && supabaseAdmin) {
       const { error } = await supabaseAdmin
         .from("students")
-        .update({ photo_path: null })
+        .delete()
         .eq("id", data.entryId);
 
       if (error) return { success: false, error: error.message };
 
       await supabaseAdmin.from("audit_logs").insert({
         admin_id: admin.id,
-        action:   "STUDENT_PHOTO_DELETED",
+        action:   "STUDENT_DELETED",
         metadata: { student_id: data.entryId },
       });
 
@@ -556,18 +541,35 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      // Query valid students with uploaded photos
-      const { data: validStudents, error } = await supabaseAdmin
-        .from("students")
-        .select("id, full_name, college_name, photo_path, ticket_id")
-        .not("photo_path", "is", null);
+      // 1. Check if winner already exists in winners table
+      const { data: existingWinner } = await supabaseAdmin
+        .from("winners")
+        .select("ticket_number, selected_at")
+        .limit(1)
+        .maybeSingle();
 
-      if (error || !validStudents || validStudents.length === 0) {
-        return { success: false, error: "No valid student entries with photos found." };
+      if (existingWinner) {
+        return { success: false, error: "Lucky draw has already been executed. A winner exists." };
       }
 
-      const randomIndex = Math.floor(Math.random() * validStudents.length);
-      const chosen = validStudents[randomIndex];
+      // 2. Query valid students from public.students
+      const { data: allStudents, error } = await supabaseAdmin
+        .from("students")
+        .select("id, full_name, college_name, photo_path, ticket_id, ticket_number")
+        .neq("status", "disqualified");
+
+      if (error || !allStudents || allStudents.length === 0) {
+        return { success: false, error: "No valid registered students found for the lucky draw." };
+      }
+
+      // Filter for students with photos, or fallback to all registered students
+      const photoStudents = allStudents.filter((s: any) => Boolean(s.photo_path));
+      const pool = photoStudents.length > 0 ? photoStudents : allStudents;
+
+      const randomIndex = Math.floor(Math.random() * pool.length);
+      const chosen = pool[randomIndex];
+
+      const ticketNum = chosen.ticket_id || `UTKARSH2026-${String(chosen.ticket_number || 1).padStart(4, '0')}`;
 
       let photo_url = chosen.photo_path;
       if (chosen.photo_path && !chosen.photo_path.startsWith("http")) {
@@ -577,13 +579,18 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
         photo_url = pubData?.publicUrl || chosen.photo_path;
       }
 
+      // Record winner in winners table
+      await supabaseAdmin.from("winners").insert({
+        ticket_number: ticketNum,
+      });
+
       const winner = {
-        ticket_number: chosen.ticket_id || "UTKARSH2026-0001",
+        ticket_number: ticketNum,
         display_name:  chosen.full_name,
         college_name:  chosen.college_name,
-        photo_path:    photo_url,
+        photo_path:    photo_url || "",
         selected_at:   new Date().toISOString(),
-        total_entries: validStudents.length,
+        total_entries: pool.length,
       };
 
       return { success: true, winner };
@@ -626,23 +633,27 @@ export const adminGetStats = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const [studentsRes, photosRes, winnerRes] = await Promise.all([
+      const [allRes, photoRes, disqualifiedRes, winnerRes] = await Promise.all([
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }),
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }).not("photo_path", "is", null),
+        supabaseAdmin.from("students").select("*", { count: "exact", head: true }).eq("status", "disqualified"),
         supabaseAdmin.from("winners").select("ticket_number, selected_at").limit(1).maybeSingle(),
       ]);
 
-      const photoCount = photosRes.count ?? 0;
-      const studentCount = studentsRes.count ?? 0;
+      const totalStudents = allRes.count ?? 0;
+      const photoCount    = photoRes.count ?? 0;
+      const rejectedCount = disqualifiedRes.count ?? 0;
+      const validCount    = photoCount > 0 ? photoCount : (totalStudents - rejectedCount);
+      const pendingCount  = Math.max(0, totalStudents - validCount - rejectedCount);
 
       return {
         success: true,
         stats: {
-          total:    photoCount,
-          valid:    photoCount,
-          pending:  0,
-          rejected: 0,
-          students: studentCount,
+          total:    totalStudents,
+          valid:    validCount,
+          pending:  pendingCount,
+          rejected: rejectedCount,
+          students: totalStudents,
           drawDone: !!winnerRes.data,
           winner:   winnerRes.data ?? null,
         },
