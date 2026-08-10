@@ -25,7 +25,12 @@ export function useCountdown() {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export function CountdownBoxes() {
+interface CountdownBoxesProps {
+  className?: string;
+  compact?: boolean;
+}
+
+export function CountdownBoxes({ className = "", compact = false }: CountdownBoxesProps) {
   const t = useCountdown();
   const items = [
     { v: t.days, l: "DAYS" },
@@ -33,15 +38,23 @@ export function CountdownBoxes() {
     { v: t.minutes, l: "MINUTES" },
     { v: t.seconds, l: "SECONDS" },
   ];
+
+  const boxClassName = compact
+    ? "w-[48px] rounded-lg border border-neon-purple/60 bg-panel/70 py-1.5 text-center glow-ring"
+    : "w-[68px] rounded-xl border border-neon-purple/60 bg-panel/70 py-2.5 text-center glow-ring";
+
+  const labelClassName = compact ? "mt-0.5 text-[7px] tracking-widest text-muted-foreground" : "mt-0.5 text-[9px] tracking-widest text-muted-foreground";
+  const valueClassName = compact ? "text-lg font-bold text-neon-pink" : "text-2xl font-bold text-neon-pink";
+
   return (
-    <div className="flex gap-3">
+    <div className={`flex gap-3 ${className}`.trim()}>
       {items.map((i) => (
         <div
           key={i.l}
-          className="w-[68px] rounded-xl border border-neon-purple/60 bg-panel/70 py-2.5 text-center glow-ring"
+          className={boxClassName}
         >
-          <div className="text-2xl font-bold text-neon-pink">{pad(i.v)}</div>
-          <div className="mt-0.5 text-[9px] tracking-widest text-muted-foreground">{i.l}</div>
+          <div className={valueClassName}>{pad(i.v)}</div>
+          <div className={labelClassName}>{i.l}</div>
         </div>
       ))}
     </div>
