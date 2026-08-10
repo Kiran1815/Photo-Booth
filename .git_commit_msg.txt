@@ -1,0 +1,1 @@
+fix(migrations): guard index creation in 004_add_winner_draw_number.sql
