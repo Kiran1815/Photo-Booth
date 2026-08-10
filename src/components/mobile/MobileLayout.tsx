@@ -9,7 +9,7 @@ import {
   Camera, Upload, Trophy, Gift, Users, Clock,
   Home, Ticket, Star, Menu, X, ChevronRight,
   Instagram, Facebook, Youtube, Mail, Send, QrCode,
-  ArrowRight, Sparkles, Heart,
+  ArrowRight, Sparkles, Heart, UserRound,
 } from "lucide-react";
 import utkarshLogoFont from "@/assets/utkarsh-logo-font.jpg";
 import heroBg from "@/assets/hero-bg.jpg";
@@ -36,6 +36,8 @@ export function MobileLayout() {
   const navigate = useNavigate();
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [activeNav, setActiveNav] = useState("home");
+  const [registered, setRegistered] = useState(false);
+  const [ticketNumber, setTicketNumber] = useState("");
   const [totalEntries, setTotalEntries]   = useState(() => localStore.getEntries().length);
   const [notifyState, setNotifyState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [notifyMsg,   setNotifyMsg]   = useState<string>("");
@@ -50,12 +52,20 @@ export function MobileLayout() {
     }
   };
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const studentId = sessionStorage.getItem("studentId");
+    const ticket = sessionStorage.getItem("studentTicket") || "";
+    setRegistered(Boolean(studentId || ticket));
+    setTicketNumber(ticket);
+  }, []);
+
   const handleNotifyMe = async () => {
     if (notifyState === "loading") return;
     const studentId    = typeof window !== "undefined" ? sessionStorage.getItem("studentId")    : null;
     const studentEmail = typeof window !== "undefined" ? sessionStorage.getItem("studentEmail") : null;
     if (!studentId && !studentEmail) {
-      setNotifyMsg("Please register first, then tap Notify Me.");
+      setNotifyMsg("Please register first to receive winner notifications.");
       setNotifyState("error");
       return;
     }
@@ -64,7 +74,7 @@ export function MobileLayout() {
       data: { student_id: studentId ?? undefined, college_email: studentEmail ?? undefined },
     });
     if (res.success) {
-      setNotifyMsg(res.message ?? "You're all set! 🎉");
+      setNotifyMsg(res.message ?? "We'll notify you once the results are announced. Thank you for participating!");
       setNotifyState("done");
     } else {
       setNotifyMsg(res.error ?? "Something went wrong.");
@@ -142,10 +152,16 @@ export function MobileLayout() {
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <Link to="/register"
-            className="btn-neon rounded-full px-4 py-1.5 text-[11px] font-semibold whitespace-nowrap">
-            Register
-          </Link>
+          {registered ? (
+            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-secondary/30">
+              <UserRound className="h-4 w-4 text-neon-purple" />
+            </span>
+          ) : (
+            <Link to="/register"
+              className="btn-neon rounded-full px-4 py-1.5 text-[11px] font-semibold whitespace-nowrap">
+              Register
+            </Link>
+          )}
           <button onClick={() => setMenuOpen(true)}
             className="rounded-full border border-border/60 p-2 hover:bg-secondary transition-colors">
             <Menu className="h-4 w-4" />
@@ -221,10 +237,12 @@ export function MobileLayout() {
           </div>
           <div className="panel px-4 py-4">
             <Ticket className="h-5 w-5 text-neon-blue mb-2" />
-            <p className="text-sm font-black text-neon-blue">UTKARSH2026-????</p>
+            <p className="text-sm font-black text-neon-blue">{ticketNumber || "—"}</p>
             <p className="text-[10px] tracking-wide text-muted-foreground uppercase">Your Ticket</p>
-            <Link to="/register"
-              className="text-[10px] text-neon-pink hover:underline block mt-0.5">Register →</Link>
+            {!registered && (
+              <Link to="/register"
+                className="text-[10px] text-neon-pink hover:underline block mt-0.5">Register →</Link>
+            )}
           </div>
         </section>
 

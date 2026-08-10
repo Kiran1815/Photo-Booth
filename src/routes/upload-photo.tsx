@@ -108,12 +108,9 @@ function UploadPhotoPage() {
         throw new Error("Photo upload failed: No storage path returned from Supabase.");
       }
 
-      // Get public URL from Supabase Storage bucket "contest-photos"
-      const { data: pubData } = supabase.storage
-        .from("contest-photos")
-        .getPublicUrl(storageResult.path);
-
-      const savedPhotoPath = pubData?.publicUrl || storageResult.path;
+      // Store the storage object path in the DB. Build the public URL later
+      // from the Bucket + path in the admin/gallery/profile queries.
+      const savedPhotoPath = storageResult.path;
 
       // 4. Update student record in public.students table ONLY after successful photo upload
       const res = await createEntry({

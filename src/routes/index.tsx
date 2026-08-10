@@ -94,16 +94,27 @@ function Index() {
   const navigate = useNavigate();
   const t = useCountdown();
   const [email, setEmail] = useState("");
+  const [ticketNumber, setTicketNumber] = useState<string>("");
+  const [registered, setRegistered] = useState<boolean>(false);
   const [totalEntries, setTotalEntries] = useState<number>(0);
   const [notifyState, setNotifyState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [notifyMsg,   setNotifyMsg]   = useState<string>("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const studentId = sessionStorage.getItem("studentId");
+    const ticket = sessionStorage.getItem("studentTicket") || "";
+    const registeredNow = Boolean(studentId || ticket);
+    setRegistered(registeredNow);
+    setTicketNumber(ticket);
+  }, []);
 
   const handleNotifyMe = async () => {
     if (notifyState === "loading") return;
     const studentId    = typeof window !== "undefined" ? sessionStorage.getItem("studentId")    : null;
     const studentEmail = typeof window !== "undefined" ? sessionStorage.getItem("studentEmail") : null;
     if (!studentId && !studentEmail) {
-      setNotifyMsg("Please register first, then click Notify Me.");
+      setNotifyMsg("Please register first to receive winner notifications.");
       setNotifyState("error");
       return;
     }
@@ -112,7 +123,7 @@ function Index() {
       data: { student_id: studentId ?? undefined, college_email: studentEmail ?? undefined },
     });
     if (res.success) {
-      setNotifyMsg(res.message ?? "You're all set! 🎉");
+      setNotifyMsg(res.message ?? "We'll notify you once the results are announced. Thank you for participating!");
       setNotifyState("done");
     } else {
       setNotifyMsg(res.error ?? "Something went wrong. Please try again.");
@@ -174,13 +185,20 @@ function Index() {
             ))}
           </nav>
 
-          <Link
-            to="/register"
-            className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-1.5 text-xs sm:px-5 sm:py-2 text-sm btn-neon"
-          >
-            <UserRound className="h-4 w-4 icon-glow-pink" />
-            Register the Event
-          </Link>
+          {registered ? (
+            <span className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-1.5 text-xs sm:px-5 sm:py-2 text-sm border border-border/60 bg-secondary/40 text-foreground">
+              <UserRound className="h-4 w-4 text-neon-purple" />
+              <span className="sr-only">Registered participant</span>
+            </span>
+          ) : (
+            <Link
+              to="/register"
+              className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-1.5 text-xs sm:px-5 sm:py-2 text-sm btn-neon"
+            >
+              <UserRound className="h-4 w-4 icon-glow-pink" />
+              Register the Event
+            </Link>
+          )}
         </div>
       </header>
 
@@ -274,7 +292,9 @@ function Index() {
                 alt="Utkarsh 2026"
                 className="h-5 w-auto object-contain [filter:invert(1)_brightness(3)_contrast(500%)] mix-blend-screen"
               />
-              <span className="text-sm font-semibold text-neon-pink">-0142</span>
+              <span className="text-sm font-semibold text-neon-pink">
+                {ticketNumber || "—"}
+              </span>
             </div>
             <p className="mt-0.5 text-[11px] text-muted-foreground">Check your luck!</p>
           </div>

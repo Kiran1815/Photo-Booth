@@ -62,6 +62,20 @@ export const registerStudent = createServerFn({ method: "POST" })
         .from("students").select("id").eq("contact_number", data.contact_number).maybeSingle();
       if (existingPhone) return { success: false, error: "This phone number is already registered." };
 
+      let ticketNumber = "";
+      try {
+        const { data: rpcTicket, error: rpcErr } = await supabaseAdmin.rpc("generate_ticket_number");
+        if (!rpcErr && rpcTicket) {
+          ticketNumber = String(rpcTicket);
+        }
+      } catch (rpcErr) {
+        console.warn("Ticket RPC unavailable fallback:", rpcErr);
+      }
+
+      if (!ticketNumber) {
+        ticketNumber = `UTKARSH2026-${String(Date.now() % 99999).padStart(4, "0")}`;
+      }
+
       const { data: student, error } = await supabaseAdmin
         .from("students")
         .insert({
@@ -72,6 +86,10 @@ export const registerStudent = createServerFn({ method: "POST" })
           contact_number:  data.contact_number,
           status:          "active",
           verified_at:     new Date().toISOString(),
+          ticket_id:       ticketNumber,
+          ticket_number:   ticketNumber,
+          photo_path:      null,
+          notify_me:       false,
         })
         .select("id, full_name, college_name, college_email, ticket_id, ticket_number")
         .single();
@@ -121,7 +139,9 @@ export const createEntry = createServerFn({ method: "POST" })
         return { success: false, error: `Student record not found: ${fetchErr?.message ?? "unknown"}` };
       }
 
-      // Save photo_path into public.students
+      // Save the storage object path into public.students. The UI sends a
+      // storage object path like "UTKARSH2026-0001_123.jpg" rather than the
+      // public URL; the public URL is derived when needed.
       const { data: updated, error: updateErr } = await supabaseAdmin
         .from("students")
         .update({ photo_path: data.photo_path })
@@ -345,7 +365,7 @@ export const subscribeNotification = createServerFn({ method: "POST" })
         return { success: false, error: "No registered participant found with those details." };
 
       if (student.notify_me)
-        return { success: true, already: true, message: "You're already on the notification list! We'll let you know once the winner is finalized. 🎉" };
+        return { success: true, already: true, message: "You're already subscribed to winner notifications!" };
 
       const { error: updateErr } = await supabaseAdmin
         .from("students").update({ notify_me: true }).eq("id", student.id);
@@ -356,7 +376,7 @@ export const subscribeNotification = createServerFn({ method: "POST" })
       return {
         success: true,
         already: false,
-        message: "You're all set! We'll notify you once the winner is finalized. Thank you for participating in Utkarsh 2026 Photo Booth Contest! 🎉",
+        message: "We'll notify you once the results are announced. Thank you for participating!",
       };
     }
 
@@ -533,7 +553,7 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
           .from("contest-photos").remove([storagePath]);
         if (storageErr) {
           console.error("Storage delete error:", storageErr);
-          // Don't abort — attempt DB delete anyway but surface the warning
+          return { success: false, error: `Failed to delete storage photo: ${storageErr.message}` };
         }
       }
 
