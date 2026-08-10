@@ -62,20 +62,6 @@ export const registerStudent = createServerFn({ method: "POST" })
         .from("students").select("id").eq("contact_number", data.contact_number).maybeSingle();
       if (existingPhone) return { success: false, error: "This phone number is already registered." };
 
-      let ticketNumber = "";
-      try {
-        const { data: rpcTicket, error: rpcErr } = await supabaseAdmin.rpc("generate_ticket_number");
-        if (!rpcErr && rpcTicket) {
-          ticketNumber = String(rpcTicket);
-        }
-      } catch (rpcErr) {
-        console.warn("Ticket RPC unavailable fallback:", rpcErr);
-      }
-
-      if (!ticketNumber) {
-        ticketNumber = `UTKARSH2026-${String(Date.now() % 99999).padStart(4, "0")}`;
-      }
-
       const { data: student, error } = await supabaseAdmin
         .from("students")
         .insert({
@@ -86,8 +72,6 @@ export const registerStudent = createServerFn({ method: "POST" })
           contact_number:  data.contact_number,
           status:          "active",
           verified_at:     new Date().toISOString(),
-          ticket_id:       ticketNumber,
-          ticket_number:   ticketNumber,
           photo_path:      null,
           notify_me:       false,
         })

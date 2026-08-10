@@ -58,8 +58,8 @@ function RegisterPage() {
         sessionStorage.setItem("studentName",   form.name.trim());
         sessionStorage.setItem("studentEmail",  form.email.trim());
         // Persist ticket from DB so it never shows a stale/hardcoded value
-        const ticketFromDb = (res.student as any)?.ticket_id ?? "";
-        if (ticketFromDb) sessionStorage.setItem("studentTicket", ticketFromDb);
+          const ticketFromDb = (res.student as any)?.ticket_id ?? (res.student as any)?.ticket_number ? `UTKARSH2026-${String((res.student as any).ticket_number).padStart(4, "0")}` : "";
+          if (ticketFromDb) sessionStorage.setItem("studentTicket", ticketFromDb);
       }
 
       navigate({ to: "/upload-photo" });
