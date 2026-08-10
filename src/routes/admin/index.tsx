@@ -43,6 +43,7 @@ function AdminDashboard() {
   const [winner,       setWinner]       = useState<any>(null);
   const [drawError,    setDrawError]    = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [selectedDrawNumber, setSelectedDrawNumber] = useState<number>(1);
 
   // Session check
   useEffect(() => {
@@ -105,7 +106,7 @@ function AdminDashboard() {
   };
 
   // ── Lucky Draw ──
-  const startDrawFlow = () => setDrawState("confirm");
+  const startDrawFlow = (drawNum: number) => { setSelectedDrawNumber(drawNum); setDrawState("confirm"); };
 
   const executeDraw = async () => {
     if (!token) return;
@@ -121,7 +122,7 @@ function AdminDashboard() {
     setDrawState("animating");
 
     // Start backend call
-    const drawPromise = adminExecuteDraw({ data: { token } });
+    const drawPromise = adminExecuteDraw({ data: { token, draw: selectedDrawNumber } });
 
     // Collect photos from current entries for the shuffle animation
     const entryPhotos = entries
@@ -399,18 +400,27 @@ function AdminDashboard() {
           <div className="max-w-2xl mx-auto">
             <h1 className="text-2xl font-black tracking-wide mb-8 text-center">🎰 Lucky Draw</h1>
 
-            {/* Already done */}
-            {stats?.drawDone && drawState !== "done" ? (
-              <div className="panel p-8 text-center border border-neon-gold/40">
-                <Trophy className="mx-auto h-14 w-14 text-neon-gold icon-glow-gold mb-4" />
-                <h2 className="text-xl font-black">Draw Already Completed</h2>
-                <p className="mt-2 text-neon-gold font-bold text-2xl">{stats.winner?.ticket_number}</p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  The official winner has been permanently recorded.
-                </p>
+            <div className="panel p-8 text-center">
+              <div className="mb-4 flex gap-4 justify-center">
+                {/* Show Draw 1/2 winners if present */}
+                {stats?.winner1 ? (
+                  <div className="text-center">
+                    <p className="text-[11px] text-muted-foreground">Draw 1 Winner</p>
+                    <p className="text-neon-gold font-black">{stats.winner1.ticket_number}</p>
+                  </div>
+                ) : (
+                  <div className="text-center text-muted-foreground">Draw 1: Not run</div>
+                )}
+
+                {stats?.winner2 ? (
+                  <div className="text-center">
+                    <p className="text-[11px] text-muted-foreground">Draw 2 Winner</p>
+                    <p className="text-neon-gold font-black">{stats.winner2.ticket_number}</p>
+                  </div>
+                ) : (
+                  <div className="text-center text-muted-foreground">Draw 2: Not run</div>
+                )}
               </div>
-            ) : (
-              <div className="panel p-8 text-center">
                 {/* IDLE */}
                 {drawState === "idle" && (
                   <>
@@ -422,10 +432,16 @@ function AdminDashboard() {
                     <p className="text-[11px] text-muted-foreground mb-6">
                       Winner is selected randomly by the server. Every entry has equal probability.
                     </p>
-                    <button onClick={startDrawFlow}
-                      className="btn-neon rounded-full px-10 py-4 text-base font-black inline-flex items-center gap-2">
-                      <Trophy className="h-5 w-5" /> START LUCKY DRAW
-                    </button>
+                    <div className="flex gap-4 justify-center">
+                      <button onClick={() => startDrawFlow(1)}
+                        className="btn-neon rounded-full px-8 py-3 text-base font-black inline-flex items-center gap-2">
+                        DRAW 1
+                      </button>
+                      <button onClick={() => startDrawFlow(2)}
+                        className="btn-neon rounded-full px-8 py-3 text-base font-black inline-flex items-center gap-2">
+                        DRAW 2
+                      </button>
+                    </div>
                   </>
                 )}
 
@@ -435,7 +451,7 @@ function AdminDashboard() {
                     <AlertTriangle className="mx-auto h-14 w-14 text-neon-gold icon-glow-gold mb-4" />
                     <h2 className="text-xl font-bold">Are You Sure?</h2>
                     <p className="mt-2 text-sm text-muted-foreground mb-6">
-                      This will permanently select ONE winner from all {stats?.valid ?? 0} valid entries.
+                      This will permanently select ONE winner for <strong>DRAW {selectedDrawNumber}</strong> from all {stats?.valid ?? 0} valid entries.
                       <br />This action <strong className="text-foreground">cannot be undone</strong>.
                     </p>
                     <div className="flex gap-4 justify-center">

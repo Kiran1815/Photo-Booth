@@ -428,8 +428,10 @@ export const adminGetEntries = createServerFn({ method: "POST" })
 
       const items = (rows ?? []).map((s: any) => {
         let photo_url: string | null = s.photo_path ?? null;
-        if (photo_url && !photo_url.startsWith("http") && !photo_url.startsWith("data:")) {
-          photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(s.photo_path).data?.publicUrl ?? photo_url;
+        // Normalize stored path: if a full public URL was stored, extract the object path.
+        const storagePath = storagePathFromUrl(s.photo_path) ?? s.photo_path;
+        if (storagePath && !storagePath.startsWith("http") && !storagePath.startsWith("data:")) {
+          photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(storagePath).data?.publicUrl ?? photo_url;
         }
 
         const displayStatus = s.status === "disqualified" ? "rejected"
@@ -556,7 +558,7 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
 
 /** Admin: execute lucky draw from public.students */
 export const adminExecuteDraw = createServerFn({ method: "POST" })
-  .validator(z.object({ token: z.string() }))
+  .validator(z.object({ token: z.string(), draw: z.number().optional() }))
   .handler(async ({ data }) => {
     const admin = await verifyAdmin(`Bearer ${data.token}`);
     if (!admin) return { success: false, error: "Unauthorized. Admin access required." };
@@ -564,29 +566,43 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      // Check for existing winner
+      // Check for existing winner for this draw (default to draw 1 behavior)
+      // NOTE: adminExecuteDraw now supports an optional `draw` number to allow multiple draws.
+      // If no draw is provided, behave like Draw 1.
+      // (data.draw is optional)
+      const drawNumber = (data as any).draw ?? 1;
       const { data: existingWinner, error: winCheckErr } = await supabaseAdmin
-        .from("winners").select("ticket_number, selected_at").limit(1).maybeSingle();
+        .from("winners").select("ticket_number, selected_at, draw_number").eq("draw_number", drawNumber).limit(1).maybeSingle();
 
       if (existingWinner)
-        return { success: false, error: "Lucky draw has already been executed. A winner exists." };
+        return { success: false, error: `Draw ${drawNumber} has already been executed. A winner exists.` };
 
       // Pull eligible pool: students with photos first, else all active
-      const { data: withPhotos, error: err1 } = await supabaseAdmin
+      // For Draw 2, exclude the Draw 1 winner if present.
+      const baseQuery = supabaseAdmin
         .from("students")
         .select("id, full_name, college_name, photo_path, ticket_id, ticket_number")
-        .not("photo_path", "is", null)
         .neq("status", "disqualified");
 
-      const { data: allActive, error: err2 } = await supabaseAdmin
-        .from("students")
-        .select("id, full_name, college_name, photo_path, ticket_id, ticket_number")
-        .neq("status", "disqualified");
+      const { data: withPhotos, error: err1 } = await baseQuery.not("photo_path", "is", null);
+      const { data: allActive, error: err2 } = await baseQuery;
 
       if ((err1 && err2) || (!withPhotos?.length && !allActive?.length))
         return { success: false, error: "No valid registered students found for the lucky draw." };
 
-      const pool = (withPhotos && withPhotos.length > 0) ? withPhotos : (allActive ?? []);
+      let pool = (withPhotos && withPhotos.length > 0) ? withPhotos : (allActive ?? []);
+
+      // If this is Draw 2, exclude any winner from Draw 1
+      if (drawNumber === 2) {
+        const { data: draw1Winner } = await supabaseAdmin.from("winners").select("student_id").eq("draw_number", 1).maybeSingle();
+        if (draw1Winner?.student_id) {
+          pool = (pool ?? []).filter((p: any) => p.id !== draw1Winner.student_id);
+        }
+      }
+
+      if (!pool || pool.length === 0)
+        return { success: false, error: "No valid registered students found for the lucky draw." };
+
       const chosen = pool[Math.floor(Math.random() * pool.length)];
 
       const ticketNum = chosen.ticket_id
@@ -597,11 +613,12 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
         photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(photo_url).data?.publicUrl ?? photo_url;
       }
 
-      // Persist winner to Supabase winners table
+      // Persist winner to Supabase winners table with draw_number
       await supabaseAdmin.from("winners").insert({
         student_id:    chosen.id,
         ticket_number: ticketNum,
         selected_at:   new Date().toISOString(),
+        draw_number:   drawNumber,
       });
 
       return {
@@ -644,11 +661,12 @@ export const adminGetStats = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const [allRes, photoRes, disqRes, winnerRes] = await Promise.all([
+      const [allRes, photoRes, disqRes, winner1Res, winner2Res] = await Promise.all([
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }),
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }).not("photo_path", "is", null),
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }).eq("status", "disqualified"),
-        supabaseAdmin.from("winners").select("ticket_number, selected_at").limit(1).maybeSingle(),
+        supabaseAdmin.from("winners").select("ticket_number, selected_at, draw_number").eq("draw_number", 1).limit(1).maybeSingle(),
+        supabaseAdmin.from("winners").select("ticket_number, selected_at, draw_number").eq("draw_number", 2).limit(1).maybeSingle(),
       ]);
 
       const totalStudents = allRes.count    ?? 0;
@@ -667,8 +685,10 @@ export const adminGetStats = createServerFn({ method: "POST" })
           pending:  pendingCount,
           rejected: rejectedCount,
           students: totalStudents,
-          drawDone: !!winnerRes.data,
-          winner:   winnerRes.data ?? null,
+          drawDone: !!winner1Res.data,
+          winner:   winner1Res.data ?? null,
+          winner1:  winner1Res.data ?? null,
+          winner2:  winner2Res.data ?? null,
         },
       };
     }
