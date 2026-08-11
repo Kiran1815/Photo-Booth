@@ -13,12 +13,14 @@ BEGIN
   -- Acquire transaction-scoped advisory lock to avoid race conditions
   PERFORM pg_advisory_xact_lock(123456789);
 
-  -- Find the smallest missing positive integer in students.ticket_number
+  -- Parse the numeric suffix from tickets of the form UTKARSH2026-XXXX.
+  -- Reuse the lowest missing positive value and preserve the ticket prefix.
   SELECT COALESCE(MIN(missing_series.num), NULL) INTO v_candidate
   FROM (
-    SELECT generate_series(1, COALESCE((SELECT MAX(ticket_number) FROM students), 0) + 1) AS num
+    SELECT generate_series(1, COALESCE((SELECT MAX(CAST(REGEXP_REPLACE(ticket_number, '^.*-(\\d+)$', '\\1') AS BIGINT)) FROM students), 0) + 1) AS num
     EXCEPT
-    SELECT ticket_number FROM students
+    SELECT CAST(REGEXP_REPLACE(ticket_number, '^.*-(\\d+)$', '\\1') AS BIGINT) FROM students
+    WHERE ticket_number ~ '^UTKARSH2026-\\d{4}$'
     ORDER BY 1
   ) AS missing_series
   LIMIT 1;
@@ -27,7 +29,7 @@ BEGIN
     RETURN 'UTKARSH2026-' || LPAD(v_candidate::TEXT, 4, '0');
   END IF;
 
-  -- Fallback: use sequence to generate next ticket
+  -- Fallback: use sequence to generate the next ticket number.
   SELECT nextval('ticket_seq') INTO v_next;
   RETURN 'UTKARSH2026-' || LPAD(v_next::TEXT, 4, '0');
 END;
