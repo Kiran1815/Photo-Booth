@@ -527,7 +527,7 @@ function AdminDashboard() {
 
                 {/* ERROR */}
                 {drawState === "error" && (
-                  <>
+                  <div>
                     <AlertTriangle className="mx-auto h-12 w-12 text-destructive mb-4" />
                     <h2 className="text-lg font-bold text-destructive">Draw Failed</h2>
                     <p className="mt-2 text-sm text-muted-foreground mb-4">{drawError}</p>
@@ -535,10 +535,9 @@ function AdminDashboard() {
                       className="btn-outline-neon border rounded-full px-6 py-3 text-sm font-semibold">
                       Try Again
                     </button>
-                  </>
+                  </div>
                 )}
-              </div>
-            )}
+            </div>
           </div>
         )}
       </div>
