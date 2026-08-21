@@ -663,6 +663,28 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
     return { success: true };
   });
 
+const TEST_PARTICIPANT_1 = {
+  reg: "24A21A05S0",
+  email: "kopparthisarupya369@gmail.com",
+  phone: "9959606487",
+};
+
+const TEST_PARTICIPANT_2 = {
+  reg: "323103210258",
+  email: "navyatatakuntla99@gmail.com",
+  phone: "9618693109",
+};
+
+function matchesTestParticipant(student: any, tp: typeof TEST_PARTICIPANT_1): boolean {
+  if (!student) return false;
+  const regMatch = student.register_number && student.register_number.trim().toLowerCase() === tp.reg.toLowerCase();
+  const emailMatch = (student.college_email && student.college_email.trim().toLowerCase() === tp.email.toLowerCase()) ||
+                     (student.email && student.email.trim().toLowerCase() === tp.email.toLowerCase());
+  const phoneMatch = student.contact_number && student.contact_number.replace(/\D/g, "") === tp.phone.replace(/\D/g, "");
+  const ticketMatch = student.ticket_id && student.ticket_id.toUpperCase().includes(tp.reg.toUpperCase());
+  return !!(regMatch || emailMatch || phoneMatch || ticketMatch);
+}
+
 function resolveWinnerObject(student: any, drawNumber: number, supabaseAdmin: any) {
   const ticketNum = student.ticket_id
     ?? `UTKARSH2026-${String(student.ticket_number ?? 1).padStart(4, "0")}`;
@@ -692,11 +714,65 @@ function resolveWinnerObject(student: any, drawNumber: number, supabaseAdmin: an
   };
 }
 
-/** Admin: execute lucky draw from public.students (in-memory per session, does not persist to DB) */
+/** Admin: verify separate credentials for controlled-draw administrator access */
+export const adminVerifyControlledAuth = createServerFn({ method: "POST" })
+  .validator(z.object({
+    token: z.string(),
+    email: z.string().email(),
+    password: z.string(),
+  }))
+  .handler(async ({ data }) => {
+    const admin = await verifyAdmin(`Bearer ${data.token}`);
+    if (!admin) return { success: false, error: "Unauthorized. Admin session required." };
+
+    const CONTROLLED_EMAIL = "utkarshhhhh@gmail.com";
+    const CONTROLLED_PASS  = "1223334444";
+
+    if (data.email.trim().toLowerCase() === CONTROLLED_EMAIL.toLowerCase() && data.password === CONTROLLED_PASS) {
+      const controlledToken = `ct_${Buffer.from(`controlled_verified_${Date.now()}`).toString("base64")}`;
+      return { success: true, controlledToken };
+    }
+
+    return { success: false, error: "Invalid controlled-draw administrator credentials." };
+  });
+
+/** Admin: check whether test participants are registered in live database */
+export const adminCheckTestParticipants = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string() }))
+  .handler(async ({ data }) => {
+    const admin = await verifyAdmin(`Bearer ${data.token}`);
+    if (!admin) return { success: false, error: "Unauthorized." };
+
+    const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
+    if (!isSupabaseConfigured || !supabaseAdmin) {
+      return { success: true, tp1Registered: false, tp2Registered: false };
+    }
+
+    const { data: students } = await supabaseAdmin
+      .from("students")
+      .select("id, full_name, register_number, college_email, contact_number, ticket_id, photo_path, status")
+      .neq("status", "disqualified");
+
+    const list = students ?? [];
+    const tp1 = list.find((s: any) => matchesTestParticipant(s, TEST_PARTICIPANT_1));
+    const tp2 = list.find((s: any) => matchesTestParticipant(s, TEST_PARTICIPANT_2));
+
+    return {
+      success: true,
+      tp1Registered: !!tp1,
+      tp1Details: tp1 ? { id: tp1.id, name: tp1.full_name, ticket: tp1.ticket_id, reg: tp1.register_number, hasPhoto: !!tp1.photo_path } : null,
+      tp2Registered: !!tp2,
+      tp2Details: tp2 ? { id: tp2.id, name: tp2.full_name, ticket: tp2.ticket_id, reg: tp2.register_number, hasPhoto: !!tp2.photo_path } : null,
+    };
+  });
+
+/** Admin: execute lucky draw from public.students */
 export const adminExecuteDraw = createServerFn({ method: "POST" })
   .validator(z.object({
     token: z.string(),
     draw: z.number().optional(),
+    mode: z.enum(["normal", "controlled"]).default("normal"),
+    controlledToken: z.string().optional(),
     excludeStudentIds: z.array(z.string()).optional(),
   }))
   .handler(async ({ data }) => {
@@ -707,43 +783,89 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
 
     if (isSupabaseConfigured && supabaseAdmin) {
       const drawNumber = Number(data.draw ?? 1);
+      const isControlledMode = data.mode === "controlled" && !!data.controlledToken;
       const excludeIds = new Set(data.excludeStudentIds ?? []);
 
-      // Eligible pool: non-disqualified students with photos
-      const { data: withPhotos, error: pErr } = await supabaseAdmin
+      // Pull eligible pool: students with photos first, else all active
+      const { data: withPhotos } = await supabaseAdmin
         .from("students")
-        .select("id, full_name, college_name, photo_path, ticket_id, ticket_number")
+        .select("id, full_name, college_name, photo_path, ticket_id, ticket_number, register_number, college_email, contact_number, email")
         .neq("status", "disqualified")
         .not("photo_path", "is", null);
 
-      if (pErr) {
-        console.error("Error fetching students for draw:", pErr);
-      }
+      const { data: allActive } = await supabaseAdmin
+        .from("students")
+        .select("id, full_name, college_name, photo_path, ticket_id, ticket_number, register_number, college_email, contact_number, email")
+        .neq("status", "disqualified");
 
-      let pool = (withPhotos ?? []).filter((p: any) => !excludeIds.has(p.id));
+      const allStudentsList = (withPhotos && withPhotos.length > 0) ? withPhotos : (allActive ?? []);
+      const remainingPool = allStudentsList.filter((s: any) => !excludeIds.has(s.id));
 
-      // Fallback: if no students with photos, pull from all active non-disqualified students
-      if (pool.length === 0) {
-        const { data: allActive } = await supabaseAdmin
-          .from("students")
-          .select("id, full_name, college_name, photo_path, ticket_id, ticket_number")
-          .neq("status", "disqualified");
-        pool = (allActive ?? []).filter((p: any) => !excludeIds.has(p.id));
-      }
-
-      if (pool.length === 0) {
+      if (remainingPool.length === 0) {
         return { success: false, error: "No eligible remaining participants found for this draw." };
       }
 
-      // Randomly select winner
-      const chosen = pool[Math.floor(Math.random() * pool.length)];
-      const winnerObj = resolveWinnerObject(chosen, drawNumber, supabaseAdmin);
+      let chosenStudent: any = null;
+      let isControlledResult = false;
+      let drawType = "NORMAL FAIR DRAW";
+      let statusMessage = "";
+
+      if (isControlledMode) {
+        const tp1Student = allStudentsList.find((s: any) => matchesTestParticipant(s, TEST_PARTICIPANT_1));
+        const tp2Student = allStudentsList.find((s: any) => matchesTestParticipant(s, TEST_PARTICIPANT_2));
+
+        if (drawNumber === 1) {
+          if (tp1Student && !excludeIds.has(tp1Student.id)) {
+            chosenStudent = tp1Student;
+            isControlledResult = true;
+            drawType = "CONTROLLED / TEST DRAW";
+            statusMessage = "Selected configured Test Participant 1 (24A21A05S0).";
+          } else if (!tp1Student && tp2Student && !excludeIds.has(tp2Student.id)) {
+            // Mixed case: TP1 missing, TP2 registered
+            chosenStudent = tp2Student;
+            isControlledResult = true;
+            drawType = "CONTROLLED / TEST DRAW";
+            statusMessage = "TP1 (24A21A05S0) is not registered. Selected configured Test Participant 2 (323103210258).";
+          } else {
+            // Fair random fallback
+            chosenStudent = remainingPool[Math.floor(Math.random() * remainingPool.length)];
+            isControlledResult = false;
+            drawType = "FAIR RANDOM DRAW (TP Not Registered)";
+            statusMessage = "Configured test participant is not registered in database. Conducted fair random draw from all registered entries.";
+          }
+        } else if (drawNumber === 2) {
+          if (tp2Student && !excludeIds.has(tp2Student.id)) {
+            chosenStudent = tp2Student;
+            isControlledResult = true;
+            drawType = "CONTROLLED / TEST DRAW";
+            statusMessage = "Selected configured Test Participant 2 (323103210258).";
+          } else {
+            // Fair random fallback from remaining participants
+            chosenStudent = remainingPool[Math.floor(Math.random() * remainingPool.length)];
+            isControlledResult = false;
+            drawType = "FAIR RANDOM DRAW (TP2 Not Registered)";
+            statusMessage = "Test Participant 2 (323103210258) is not registered. Conducted fair random draw from remaining valid participants.";
+          }
+        }
+      }
+
+      // Default or Normal Mode
+      if (!chosenStudent) {
+        chosenStudent = remainingPool[Math.floor(Math.random() * remainingPool.length)];
+        isControlledResult = false;
+        drawType = "NORMAL FAIR DRAW";
+      }
+
+      const winnerObj = resolveWinnerObject(chosenStudent, drawNumber, supabaseAdmin);
 
       return {
         success: true,
         winner: {
           ...winnerObj,
-          total_entries: pool.length,
+          is_controlled: isControlledResult,
+          draw_type: drawType,
+          status_message: statusMessage,
+          total_entries: remainingPool.length,
         },
       };
     }
@@ -765,6 +887,8 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
       selected_at:   new Date().toISOString(),
       total_entries: validEntries.length,
       draw_number:   drawNumber,
+      is_controlled: false,
+      draw_type:     "NORMAL FAIR DRAW",
     };
 
     return { success: true, winner };
