@@ -14,7 +14,7 @@ import {
   Sparkles,
   Heart,
   Instagram,
-  Facebook,
+  Linkedin,
   Youtube,
   Mail,
   Send,
@@ -448,62 +448,54 @@ function Index() {
 
       {/* Contact strip */}
       <section id="contact" className="mx-auto max-w-[1240px] px-5 pb-8">
-        <div className="grid gap-6 divide-border panel px-7 py-6 md:grid-cols-4 md:divide-x">
-          <div className="flex items-center gap-4">
-            <img
-              src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=Utkarsh2026-PhotoBooth&bgcolor=ffffff"
-              alt="QR code to join the photo booth contest"
-              loading="lazy"
-              width={64}
-              height={64}
-              className="h-16 w-16 rounded"
-            />
-            <div>
-              <p className="text-[13px] font-semibold">SCAN &amp; PARTICIPATE</p>
-              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                Scan the QR code at the photo booth and join now!
-              </p>
+        <div className="grid gap-6 divide-border panel px-7 py-6 sm:grid-cols-2 sm:divide-x">
+          <div className="flex flex-col justify-center items-center sm:items-start">
+            <p className="text-[13px] font-semibold tracking-wider uppercase text-foreground">FOLLOW US</p>
+            <div className="mt-3 flex items-center gap-3">
+              <a
+                href="https://www.instagram.com/utkarsh_20_26?igsi=ZHJnbDhscmZueHk4"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Instagram"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-neon-purple/60 text-neon-purple transition-all duration-200 hover:bg-secondary hover:scale-110 hover:border-neon-pink hover:text-neon-pink"
+              >
+                <Instagram className="h-4 w-4 icon-glow-purple" />
+              </a>
+              <a
+                href="https://www.linkedin.com/in/swarnandhra-it-departmenthod-5b70662a0?utm_source=share_via&utm_content=profile&utm_medium=member_android"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="LinkedIn"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-neon-purple/60 text-neon-purple transition-all duration-200 hover:bg-secondary hover:scale-110 hover:border-neon-blue hover:text-neon-blue"
+              >
+                <Linkedin className="h-4 w-4 icon-glow-purple" />
+              </a>
+              <a
+                href="https://youtube.com/@swarnandhraitdepartment?si=nw4ay6taSMjKpjlm"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="YouTube"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-neon-purple/60 text-neon-purple transition-all duration-200 hover:bg-secondary hover:scale-110 hover:border-destructive hover:text-destructive"
+              >
+                <Youtube className="h-4 w-4 icon-glow-purple" />
+              </a>
             </div>
           </div>
 
-          <div className="md:pl-7">
-            <p className="text-[13px] font-semibold">FOLLOW US</p>
-            <div className="mt-3 flex gap-3">
-              {[Instagram, Facebook, Youtube].map((I, i) => (
-                <a
-                  key={i}
-                  href="#contact"
-                  aria-label="Social link"
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-neon-purple/60 text-neon-purple transition-colors hover:bg-secondary"
-                >
-                  <I className="h-4 w-4 icon-glow-purple" />
-                </a>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3 md:pl-7">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neon-purple/60">
+          <div className="flex items-center gap-3 sm:pl-7 justify-center sm:justify-start">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neon-purple/60">
               <Mail className="h-4 w-4 text-neon-purple icon-glow-purple" />
             </span>
             <div>
-              <p className="text-[13px] font-semibold">HAVE QUESTIONS?</p>
-              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                Reach out to our team.
-                <br />
-                info@fest26.com
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3 md:pl-7">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neon-purple/60">
-              <Send className="h-4 w-4 text-neon-purple icon-glow-purple" />
-            </span>
-            <div>
-              <p className="text-[13px] font-semibold">STAY UPDATED</p>
-              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                Get updates and winner announcements.
+              <p className="text-[13px] font-semibold tracking-wider uppercase text-foreground">HAVE QUESTIONS?</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                Reach out to our team at{" "}
+                <a
+                  href="mailto:utkarsh@swarnandhra.ac.in"
+                  className="text-neon-pink hover:underline font-medium"
+                >
+                  utkarsh@swarnandhra.ac.in
+                </a>
               </p>
             </div>
           </div>
