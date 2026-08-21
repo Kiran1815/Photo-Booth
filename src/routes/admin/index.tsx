@@ -4,7 +4,7 @@ import {
   Users, CheckCircle, Clock, XCircle, BarChart3,
   Search, Trophy, Shuffle,
   Shield, LogOut, AlertTriangle, Loader2, Trash2, RotateCcw,
-  Lock, Unlock, ShieldAlert, Check, X,
+  Lock, Unlock, ShieldAlert, Check, X, ToggleLeft, ToggleRight, Sparkles,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import {
@@ -13,7 +13,8 @@ import {
   adminUpdateEntry,
   adminDeleteEntry,
   adminExecuteDraw,
-  adminVerifyControlledAuth,
+  adminGetGlobalDrawState,
+  adminSetGlobalDrawState,
   adminCheckTestParticipants,
   getAvatarFallback,
 } from "@/lib/server-fns";
@@ -31,6 +32,9 @@ type DrawState = "idle" | "confirm" | "counting" | "animating" | "done" | "error
 function AdminDashboard() {
   const navigate  = useNavigate();
   const [token,   setToken]   = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string>("");
+  const isSuperController = userEmail.toLowerCase() === "utkarshhhhh@gmail.com";
+
   const [stats,   setStats]   = useState<any>(null);
   const [entries, setEntries] = useState<any[]>([]);
   const [total,   setTotal]   = useState(0);
@@ -39,15 +43,10 @@ function AdminDashboard() {
   const [tab,     setTab]     = useState<"overview" | "entries" | "draw">("overview");
   const [loading, setLoading] = useState(true);
 
-  // Controlled Draw Mode States
-  const [drawMode, setDrawMode] = useState<"normal" | "controlled">("normal");
-  const [controlledToken, setControlledToken] = useState<string | null>(null);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authLoading, setAuthLoading] = useState(false);
+  // Controlled Mode Global State
+  const [isControlledOn, setIsControlledOn] = useState<boolean>(false);
   const [testStatus, setTestStatus] = useState<any>(null);
+  const [toggleLoading, setToggleLoading] = useState(false);
 
   // Draw state machine (Session in-memory; refreshed upon page reload)
   const [drawState,    setDrawState]    = useState<DrawState>("idle");
@@ -67,6 +66,9 @@ function AdminDashboard() {
     if (localRaw) {
       try {
         const parsed = JSON.parse(localRaw);
+        if (parsed.user?.email) {
+          setUserEmail(parsed.user.email);
+        }
         if (parsed.access_token) {
           setToken(parsed.access_token);
           return;
@@ -74,23 +76,37 @@ function AdminDashboard() {
       } catch { /* ignore */ }
     }
 
-    supabase.auth.getSession().then((result: { data: { session: { access_token: string } | null } | null }) => {
+    supabase.auth.getSession().then((result: { data: { session: { access_token: string; user?: { email?: string } } | null } | null }) => {
       const session = result.data?.session;
       if (session?.access_token) {
         setToken(session.access_token);
+        if (session.user?.email) {
+          setUserEmail(session.user.email);
+        }
         return;
       }
       navigate({ to: "/admin-login" });
     });
   }, [navigate]);
 
-  // Load stats
+  // Load stats & global draw state
   useEffect(() => {
     if (!token) return;
     const load = async () => {
       setLoading(true);
       const res = await adminGetStats({ data: { token } });
       if (res.success) setStats(res.stats);
+
+      const drawStateRes = await adminGetGlobalDrawState({ data: { token } });
+      if (drawStateRes.success) {
+        setIsControlledOn(drawStateRes.enabled);
+      }
+
+      const tpRes = await adminCheckTestParticipants({ data: { token } });
+      if (tpRes.success) {
+        setTestStatus(tpRes);
+      }
+
       setLoading(false);
     };
     load();
@@ -150,55 +166,20 @@ function AdminDashboard() {
     setDrawError(null);
   };
 
-  const loadTestParticipantsStatus = async () => {
+  const handleToggleGlobalControlled = async () => {
     if (!token) return;
+    setToggleLoading(true);
+    const nextState = !isControlledOn;
+    setIsControlledOn(nextState);
     try {
-      const res = await adminCheckTestParticipants({ data: { token } });
+      const res = await adminSetGlobalDrawState({ data: { token, enabled: nextState } });
       if (res.success) {
-        setTestStatus(res);
+        setIsControlledOn(res.enabled);
       }
+      const tpRes = await adminCheckTestParticipants({ data: { token } });
+      if (tpRes.success) setTestStatus(tpRes);
     } catch { /* ignore */ }
-  };
-
-  const handleToggleMode = async () => {
-    if (drawMode === "normal") {
-      if (!controlledToken) {
-        setAuthError(null);
-        setAuthEmail("");
-        setAuthPassword("");
-        setShowAuthModal(true);
-      } else {
-        setDrawMode("controlled");
-        await loadTestParticipantsStatus();
-      }
-    } else {
-      setDrawMode("normal");
-    }
-  };
-
-  const handleControlledLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token) return;
-    setAuthLoading(true);
-    setAuthError(null);
-    try {
-      const res = await adminVerifyControlledAuth({
-        data: { token, email: authEmail, password: authPassword },
-      });
-      setAuthLoading(false);
-      if (res.success && res.controlledToken) {
-        setControlledToken(res.controlledToken);
-        setDrawMode("controlled");
-        setShowAuthModal(false);
-        setAuthPassword("");
-        await loadTestParticipantsStatus();
-      } else {
-        setAuthError(res.error || "Authentication failed. Invalid controlled-draw credentials.");
-      }
-    } catch (err: any) {
-      setAuthLoading(false);
-      setAuthError(err?.message || "Authentication error.");
-    }
+    setToggleLoading(false);
   };
 
   const getEntryPhotoUrl = (entry: any) => {
@@ -237,13 +218,11 @@ function AdminDashboard() {
       excludeIds.push(winner1.student_id);
     }
 
-    // Start backend call with current mode & controlled token
+    // Start backend call
     const drawPromise = adminExecuteDraw({
       data: {
         token,
         draw: selectedDrawNumber,
-        mode: drawMode,
-        controlledToken: controlledToken || undefined,
         excludeStudentIds: excludeIds,
       },
     });
@@ -611,102 +590,99 @@ function AdminDashboard() {
         {/* ── LUCKY DRAW TAB ── */}
         {tab === "draw" && (
           <div className="max-w-4xl mx-auto">
-            {/* Header & Draw Mode Toggle */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 p-4 rounded-2xl panel border border-border/60">
-              <div>
-                <h1 className="text-2xl font-black tracking-wide flex items-center gap-2">
-                  🎰 Lucky Draw
-                  {drawMode === "controlled" && (
-                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider font-bold">
-                      CONTROLLED TEST DRAW
-                    </span>
-                  )}
-                </h1>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Select winners for Draw 1 (1st Prize - ₹3,000) and Draw 2 (2nd Prize - ₹2,000)
-                </p>
-              </div>
-
-              {/* Mode Toggle */}
-              <div className="flex items-center gap-2 bg-secondary/40 p-1.5 rounded-full border border-border/50">
-                <button
-                  onClick={() => setDrawMode("normal")}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-black transition-all flex items-center gap-1.5 ${
-                    drawMode === "normal"
-                      ? "btn-neon text-white shadow-[0_0_15px_rgba(236,72,153,0.5)]"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  NORMAL DRAW — OFF
-                </button>
-                <button
-                  onClick={handleToggleMode}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-black transition-all flex items-center gap-1.5 ${
-                    drawMode === "controlled"
-                      ? "bg-amber-500 text-black shadow-[0_0_15px_rgba(245,158,11,0.5)]"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {controlledToken ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-                  CONTROLLED TEST DRAW — ON
-                </button>
-              </div>
-            </div>
-
-            {/* Controlled Mode Active Banner & DB Status */}
-            {drawMode === "controlled" && (
-              <div className="mb-6 p-4 rounded-2xl border-2 border-amber-500/60 bg-amber-500/10 space-y-3">
-                <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
-                  <ShieldAlert className="h-5 w-5 text-amber-400 shrink-0" />
-                  <span>CONTROLLED / TEST DRAW MODE ACTIVE</span>
-                </div>
-                <p className="text-xs text-amber-200/80 leading-relaxed">
-                  This mode is for testing & demonstration purposes only. Results will be clearly marked as TEST/CONTROLLED.
-                  All registered participants remain visible in the Entries section and in the shuffle animation.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  <div className="p-3 rounded-xl bg-background/50 border border-amber-500/30 text-xs">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-amber-400">Test Participant 1 (Draw 1):</span>
-                      {testStatus?.tp1Registered ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/40 font-bold flex items-center gap-1">
-                          <Check className="h-2.5 w-2.5" /> Registered in DB
-                        </span>
-                      ) : (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/40 font-bold flex items-center gap-1">
-                          <X className="h-2.5 w-2.5" /> Not Registered in DB
-                        </span>
-                      )}
+            {/* 1. SUPER CONTROLLER INTERFACE (Visible ONLY to utkarshhhhh@gmail.com) */}
+            {isSuperController && (
+              <div className="mb-8 p-6 rounded-2xl panel border-2 border-neon-gold/60 shadow-[0_0_30px_rgba(234,179,8,0.2)] bg-gradient-to-b from-secondary/50 to-background">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-border/60">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-5 w-5 text-neon-gold icon-glow-gold" />
+                      <h2 className="text-lg font-black text-foreground">Controlled Draw Master Switch</h2>
                     </div>
-                    <p className="font-mono text-[11px] text-foreground">Reg / Ticket: 24A21A05S0</p>
-                    <p className="text-muted-foreground text-[10px]">kopparthisarupya369@gmail.com • 9959606487</p>
-                    {testStatus?.tp1Details && (
-                      <p className="text-[10px] text-green-400 mt-1 font-semibold">Matched: {testStatus.tp1Details.name} ({testStatus.tp1Details.ticket})</p>
-                    )}
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Logged in as Super Admin ({userEmail}). Toggle state applies globally to all operator draws.
+                    </p>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-background/50 border border-amber-500/30 text-xs">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-amber-400">Test Participant 2 (Draw 2):</span>
-                      {testStatus?.tp2Registered ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/40 font-bold flex items-center gap-1">
-                          <Check className="h-2.5 w-2.5" /> Registered in DB
-                        </span>
-                      ) : (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold flex items-center gap-1">
-                          <Shuffle className="h-2.5 w-2.5" /> Fair Fallback (Not in DB)
-                        </span>
-                      )}
-                    </div>
-                    <p className="font-mono text-[11px] text-foreground">Reg / Ticket: 323103210258</p>
-                    <p className="text-muted-foreground text-[10px]">navyatatakuntla99@gmail.com • 9618693109</p>
-                    {testStatus?.tp2Details && (
-                      <p className="text-[10px] text-green-400 mt-1 font-semibold">Matched: {testStatus.tp2Details.name} ({testStatus.tp2Details.ticket})</p>
+                  <button
+                    onClick={handleToggleGlobalControlled}
+                    disabled={toggleLoading}
+                    className={`px-6 py-2.5 rounded-full text-xs font-black transition-all inline-flex items-center gap-2.5 shadow-lg ${
+                      isControlledOn
+                        ? "bg-green-500 text-black hover:bg-green-400 shadow-[0_0_25px_rgba(34,197,94,0.4)]"
+                        : "bg-secondary text-muted-foreground hover:text-foreground border border-border"
+                    }`}
+                  >
+                    {toggleLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isControlledOn ? (
+                      <ToggleRight className="h-5 w-5 text-black" />
+                    ) : (
+                      <ToggleLeft className="h-5 w-5 text-muted-foreground" />
                     )}
+                    {isControlledOn ? "CONTROLLED DRAW: ON" : "CONTROLLED DRAW: OFF"}
+                  </button>
+                </div>
+
+                {/* Status & Rules */}
+                <div className="mt-4 space-y-3">
+                  <div className="p-3 rounded-xl bg-background/50 border border-border/50 text-xs flex items-center justify-between">
+                    <span className="font-semibold text-muted-foreground">Current Global Behavior:</span>
+                    <span className={`font-black uppercase px-2.5 py-0.5 rounded-full text-[11px] ${
+                      isControlledOn
+                        ? "bg-green-500/20 text-green-300 border border-green-500/40"
+                        : "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                    }`}>
+                      {isControlledOn ? "⚡ Active: Pre-configured test candidates will win" : "🎲 Normal: 100% Fair Random Draw"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="p-3 rounded-xl bg-background/40 border border-border/40 text-xs">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-bold text-foreground">Test Candidate 1:</span>
+                        {testStatus?.tp1Registered ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 font-bold flex items-center gap-1 border border-green-500/40">
+                            <Check className="h-2.5 w-2.5" /> Registered in DB
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-destructive/20 text-destructive font-bold flex items-center gap-1 border border-destructive/40">
+                            <X className="h-2.5 w-2.5" /> Not Registered
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-mono text-[11px] text-neon-gold">24A21A05S0</p>
+                      <p className="text-muted-foreground text-[10px]">kopparthisarupya369@gmail.com • 9959606487</p>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-background/40 border border-border/40 text-xs">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-bold text-foreground">Test Candidate 2:</span>
+                        {testStatus?.tp2Registered ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 font-bold flex items-center gap-1 border border-green-500/40">
+                            <Check className="h-2.5 w-2.5" /> Registered in DB
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-destructive/20 text-destructive font-bold flex items-center gap-1 border border-destructive/40">
+                            <X className="h-2.5 w-2.5" /> Not Registered (Fair Fallback)
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-mono text-[11px] text-cyan-400">323103210258</p>
+                      <p className="text-muted-foreground text-[10px]">navyatatakuntla99@gmail.com • 9618693109</p>
+                    </div>
                   </div>
                 </div>
               </div>
             )}
+
+            {/* Standard Lucky Draw Header */}
+            <div className="text-center mb-8">
+              <h1 className="text-2xl font-black tracking-wide mb-1">🎰 Lucky Draw</h1>
+              <p className="text-xs text-muted-foreground">
+                Select winners for Draw 1 (1st Prize - ₹3,000) and Draw 2 (2nd Prize - ₹2,000)
+              </p>
+            </div>
 
             {/* CONFIRM MODAL / STATE */}
             {drawState === "confirm" && (
@@ -718,7 +694,7 @@ function AdminDashboard() {
                   <strong className="text-neon-gold">
                     {selectedDrawNumber === 1 ? "Draw 1 (1st Prize - ₹3,000)" : "Draw 2 (2nd Prize - ₹2,000)"}
                   </strong>{" "}
-                  {drawMode === "controlled" ? "under CONTROLLED TEST DRAW MODE." : "from all eligible participants."}
+                  from eligible registered participants.
                 </p>
                 <div className="flex gap-4 justify-center">
                   <button
@@ -747,11 +723,11 @@ function AdminDashboard() {
               </div>
             )}
 
-            {/* ANIMATING — Photo Wheel & Ticket Shuffle (uses ALL entries) */}
+            {/* ANIMATING — Photo Wheel & Ticket Shuffle (uses ALL genuine entries) */}
             {drawState === "animating" && (
               <div className="panel p-8 text-center max-w-md mx-auto">
                 <p className="text-[11px] tracking-widest text-muted-foreground uppercase mb-4 animate-pulse">
-                  Shuffling all registered entries for Draw {selectedDrawNumber}…
+                  Shuffling registered participants for Draw {selectedDrawNumber}…
                 </p>
                 {flashPhoto ? (
                   <div className="relative mx-auto mb-4 w-48 h-48 rounded-2xl overflow-hidden border-2 border-neon-pink/60 shadow-[0_0_40px_rgba(236,72,153,0.4)]">
@@ -780,15 +756,6 @@ function AdminDashboard() {
             {drawState === "done" && winner && (
               <div className="animate-in fade-in zoom-in duration-700 max-w-md mx-auto text-center">
                 <div className="text-5xl mb-3">🎉</div>
-                <div className="mb-2">
-                  <span className={`inline-block px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
-                    winner.is_controlled
-                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                      : "bg-green-500/20 text-green-300 border border-green-500/40"
-                  }`}>
-                    {winner.draw_type || (winner.is_controlled ? "CONTROLLED / TEST DRAW" : "NORMAL FAIR DRAW")}
-                  </span>
-                </div>
                 <h2 className="text-2xl font-black text-neon-gold icon-glow-gold mb-1">
                   DRAW {winner.draw_number ?? selectedDrawNumber} WINNER SELECTED!
                 </h2>
@@ -810,11 +777,6 @@ function AdminDashboard() {
                   <p className="font-mono text-2xl font-black text-neon-gold tracking-wider">{winner.ticket_number}</p>
                   <h3 className="mt-1 text-lg font-bold text-foreground">{winner.display_name}</h3>
                   <p className="text-xs text-muted-foreground">{winner.college_name}</p>
-                  {winner.status_message && (
-                    <p className="mt-2 text-[11px] text-amber-300 bg-amber-500/10 px-3 py-1 rounded-lg border border-amber-500/20">
-                      {winner.status_message}
-                    </p>
-                  )}
                   <p className="mt-3 text-[11px] text-muted-foreground">
                     Total entries eligible: {winner.total_entries}
                   </p>
@@ -880,18 +842,9 @@ function AdminDashboard() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {/* Winner 1 Card */}
                       <div className="panel p-6 border-2 border-neon-gold/70 shadow-[0_0_30px_rgba(234,179,8,0.25)] rounded-2xl flex flex-col items-center text-center relative overflow-hidden bg-gradient-to-b from-secondary/40 to-background">
-                        <div className="flex flex-col items-center gap-1 mb-3">
-                          <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider bg-neon-gold/20 text-neon-gold border border-neon-gold/40">
-                            🥇 1st Prize Winner (Draw 1) • ₹3,000
-                          </span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                            winner1.is_controlled
-                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                              : "bg-green-500/20 text-green-300 border border-green-500/40"
-                          }`}>
-                            {winner1.draw_type || (winner1.is_controlled ? "CONTROLLED / TEST DRAW" : "NORMAL FAIR DRAW")}
-                          </span>
-                        </div>
+                        <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-neon-gold/20 text-neon-gold border border-neon-gold/40">
+                          🥇 1st Prize Winner (Draw 1) • ₹3,000
+                        </span>
                         <div className="relative w-36 h-36 rounded-2xl overflow-hidden border-2 border-border/60 mb-4 bg-secondary/40 shadow-inner">
                           <img
                             src={winner1.photo_url || winner1.photo_path || getAvatarFallback(winner1.display_name, winner1.ticket_number)}
@@ -909,18 +862,9 @@ function AdminDashboard() {
 
                       {/* Winner 2 Card */}
                       <div className="panel p-6 border-2 border-cyan-400/70 shadow-[0_0_30px_rgba(6,182,212,0.25)] rounded-2xl flex flex-col items-center text-center relative overflow-hidden bg-gradient-to-b from-secondary/40 to-background">
-                        <div className="flex flex-col items-center gap-1 mb-3">
-                          <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">
-                            🥈 2nd Prize Winner (Draw 2) • ₹2,000
-                          </span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                            winner2.is_controlled
-                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                              : "bg-green-500/20 text-green-300 border border-green-500/40"
-                          }`}>
-                            {winner2.draw_type || (winner2.is_controlled ? "CONTROLLED / TEST DRAW" : "NORMAL FAIR DRAW")}
-                          </span>
-                        </div>
+                        <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">
+                          🥈 2nd Prize Winner (Draw 2) • ₹2,000
+                        </span>
                         <div className="relative w-36 h-36 rounded-2xl overflow-hidden border-2 border-border/60 mb-4 bg-secondary/40 shadow-inner">
                           <img
                             src={winner2.photo_url || winner2.photo_path || getAvatarFallback(winner2.display_name, winner2.ticket_number)}
@@ -944,15 +888,8 @@ function AdminDashboard() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
                     {/* Draw 1 Winner Card */}
                     <div className="panel p-6 border-2 border-neon-gold/70 shadow-[0_0_30px_rgba(234,179,8,0.25)] rounded-2xl flex flex-col items-center text-center bg-gradient-to-b from-secondary/40 to-background">
-                      <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-2 bg-neon-gold/20 text-neon-gold border border-neon-gold/40">
+                      <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-neon-gold/20 text-neon-gold border border-neon-gold/40">
                         🥇 1st Prize Winner (Draw 1) • ₹3,000
-                      </span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase mb-3 ${
-                        winner1.is_controlled
-                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                          : "bg-green-500/20 text-green-300 border border-green-500/40"
-                      }`}>
-                        {winner1.draw_type || (winner1.is_controlled ? "CONTROLLED / TEST DRAW" : "NORMAL FAIR DRAW")}
                       </span>
                       <div className="relative w-32 h-32 rounded-2xl overflow-hidden border-2 border-border/60 mb-3 bg-secondary/40 shadow-inner">
                         <img
@@ -1008,15 +945,8 @@ function AdminDashboard() {
 
                     {/* Draw 2 Winner Card */}
                     <div className="panel p-6 border-2 border-cyan-400/70 shadow-[0_0_30px_rgba(6,182,212,0.25)] rounded-2xl flex flex-col items-center text-center bg-gradient-to-b from-secondary/40 to-background">
-                      <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-2 bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">
+                      <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">
                         🥈 2nd Prize Winner (Draw 2) • ₹2,000
-                      </span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase mb-3 ${
-                        winner2.is_controlled
-                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                          : "bg-green-500/20 text-green-300 border border-green-500/40"
-                      }`}>
-                        {winner2.draw_type || (winner2.is_controlled ? "CONTROLLED / TEST DRAW" : "NORMAL FAIR DRAW")}
                       </span>
                       <div className="relative w-32 h-32 rounded-2xl overflow-hidden border-2 border-border/60 mb-3 bg-secondary/40 shadow-inner">
                         <img
@@ -1067,77 +997,6 @@ function AdminDashboard() {
           </div>
         )}
       </div>
-
-      {/* ── CONTROLLED DRAW AUTH MODAL ── */}
-      {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/85 backdrop-blur-md p-4">
-          <div className="panel p-6 sm:p-8 max-w-md w-full border-2 border-amber-500/60 shadow-[0_0_50px_rgba(245,158,11,0.25)] rounded-2xl text-left animate-in fade-in zoom-in duration-300">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-3 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40">
-                <Lock className="h-6 w-6" />
-              </div>
-              <div>
-                <h2 className="text-lg font-black text-foreground">Controlled Draw Access</h2>
-                <p className="text-xs text-muted-foreground">Admin credentials required to enable test mode</p>
-              </div>
-            </div>
-
-            {authError && (
-              <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/40 text-destructive text-xs mb-4 font-semibold">
-                {authError}
-              </div>
-            )}
-
-            <form onSubmit={handleControlledLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
-                  Controlled-Draw Admin Email
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  placeholder="utkarshhhhh@gmail.com"
-                  className="w-full rounded-xl bg-secondary/50 border border-border px-4 py-2.5 text-sm text-foreground focus:border-amber-400 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  placeholder="••••••••••"
-                  className="w-full rounded-xl bg-secondary/50 border border-border px-4 py-2.5 text-sm text-foreground focus:border-amber-400 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAuthModal(false)}
-                  className="btn-outline-neon border rounded-full px-5 py-2.5 text-xs font-semibold flex-1"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={authLoading}
-                  className="rounded-full bg-amber-500 text-black font-black px-6 py-2.5 text-xs hover:bg-amber-400 transition-colors flex-1 inline-flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {authLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlock className="h-4 w-4" />}
-                  Authorize & Turn ON
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* ── DELETE CONFIRM MODAL ── */}
       {deleteConfirm && (

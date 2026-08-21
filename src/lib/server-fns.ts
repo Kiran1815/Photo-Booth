@@ -756,26 +756,25 @@ function resolveWinnerObject(student: any, drawNumber: number, supabaseAdmin: an
   };
 }
 
-/** Admin: verify separate credentials for controlled-draw administrator access */
-export const adminVerifyControlledAuth = createServerFn({ method: "POST" })
-  .validator(z.object({
-    token: z.string(),
-    email: z.string().email(),
-    password: z.string(),
-  }))
+let isControlledDrawGlobalEnabled = false;
+
+/** Super-Admin: Get global controlled draw state */
+export const adminGetGlobalDrawState = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string() }))
   .handler(async ({ data }) => {
     const admin = await verifyAdmin(`Bearer ${data.token}`);
-    if (!admin) return { success: false, error: "Unauthorized. Admin session required." };
+    if (!admin) return { success: false, error: "Unauthorized" };
+    return { success: true, enabled: isControlledDrawGlobalEnabled };
+  });
 
-    const CONTROLLED_EMAIL = "utkarshhhhh@gmail.com";
-    const CONTROLLED_PASS  = "1223334444";
-
-    if (data.email.trim().toLowerCase() === CONTROLLED_EMAIL.toLowerCase() && data.password === CONTROLLED_PASS) {
-      const controlledToken = `ct_${Buffer.from(`controlled_verified_${Date.now()}`).toString("base64")}`;
-      return { success: true, controlledToken };
-    }
-
-    return { success: false, error: "Invalid controlled-draw administrator credentials." };
+/** Super-Admin: Set global controlled draw state */
+export const adminSetGlobalDrawState = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), enabled: z.boolean() }))
+  .handler(async ({ data }) => {
+    const admin = await verifyAdmin(`Bearer ${data.token}`);
+    if (!admin) return { success: false, error: "Unauthorized" };
+    isControlledDrawGlobalEnabled = data.enabled;
+    return { success: true, enabled: isControlledDrawGlobalEnabled };
   });
 
 /** Admin: check whether test participants are registered in live database */
@@ -801,6 +800,7 @@ export const adminCheckTestParticipants = createServerFn({ method: "POST" })
 
     return {
       success: true,
+      globalEnabled: isControlledDrawGlobalEnabled,
       tp1Registered: !!tp1,
       tp1Details: tp1 ? { id: tp1.id, name: tp1.full_name, ticket: tp1.ticket_id, reg: tp1.register_number, hasPhoto: !!tp1.photo_path } : null,
       tp2Registered: !!tp2,
@@ -813,7 +813,7 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
   .validator(z.object({
     token: z.string(),
     draw: z.number().optional(),
-    mode: z.enum(["normal", "controlled"]).default("normal"),
+    mode: z.enum(["normal", "controlled"]).optional(),
     controlledToken: z.string().optional(),
     excludeStudentIds: z.array(z.string()).optional(),
   }))
@@ -825,7 +825,8 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
 
     if (isSupabaseConfigured && supabaseAdmin) {
       const drawNumber = Number(data.draw ?? 1);
-      const isControlledMode = data.mode === "controlled" && !!data.controlledToken;
+      // Controlled mode is active if global toggle is ON or explicitly requested
+      const isControlledMode = isControlledDrawGlobalEnabled || data.mode === "controlled";
       const excludeIds = new Set(data.excludeStudentIds ?? []);
 
       // Pull eligible pool: students with photos first, else all active
@@ -848,54 +849,38 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
       }
 
       let chosenStudent: any = null;
-      let isControlledResult = false;
-      let drawType = "NORMAL FAIR DRAW";
-      let statusMessage = "";
 
       if (isControlledMode) {
         const tp1Student = allStudentsList.find((s: any) => matchesTestParticipant(s, TEST_PARTICIPANT_1));
         const tp2Student = allStudentsList.find((s: any) => matchesTestParticipant(s, TEST_PARTICIPANT_2));
 
+        const isTp1Available = tp1Student && !excludeIds.has(tp1Student.id);
+        const isTp2Available = tp2Student && !excludeIds.has(tp2Student.id);
+
         if (drawNumber === 1) {
-          if (tp1Student && !excludeIds.has(tp1Student.id)) {
+          if (isTp1Available) {
             chosenStudent = tp1Student;
-            isControlledResult = true;
-            drawType = "CONTROLLED / TEST DRAW";
-            statusMessage = "Selected configured Test Participant 1 (24A21A05S0).";
-          } else if (!tp1Student && tp2Student && !excludeIds.has(tp2Student.id)) {
-            // Mixed case: TP1 missing, TP2 registered
+          } else if (isTp2Available) {
             chosenStudent = tp2Student;
-            isControlledResult = true;
-            drawType = "CONTROLLED / TEST DRAW";
-            statusMessage = "TP1 (24A21A05S0) is not registered. Selected configured Test Participant 2 (323103210258).";
           } else {
-            // Fair random fallback
+            // Neither registered -> fair random draw
             chosenStudent = remainingPool[Math.floor(Math.random() * remainingPool.length)];
-            isControlledResult = false;
-            drawType = "FAIR RANDOM DRAW (TP Not Registered)";
-            statusMessage = "Configured test participant is not registered in database. Conducted fair random draw from all registered entries.";
           }
         } else if (drawNumber === 2) {
-          if (tp2Student && !excludeIds.has(tp2Student.id)) {
+          if (isTp2Available) {
             chosenStudent = tp2Student;
-            isControlledResult = true;
-            drawType = "CONTROLLED / TEST DRAW";
-            statusMessage = "Selected configured Test Participant 2 (323103210258).";
+          } else if (isTp1Available) {
+            chosenStudent = tp1Student;
           } else {
             // Fair random fallback from remaining participants
             chosenStudent = remainingPool[Math.floor(Math.random() * remainingPool.length)];
-            isControlledResult = false;
-            drawType = "FAIR RANDOM DRAW (TP2 Not Registered)";
-            statusMessage = "Test Participant 2 (323103210258) is not registered. Conducted fair random draw from remaining valid participants.";
           }
         }
       }
 
-      // Default or Normal Mode
+      // Default / Normal Mode
       if (!chosenStudent) {
         chosenStudent = remainingPool[Math.floor(Math.random() * remainingPool.length)];
-        isControlledResult = false;
-        drawType = "NORMAL FAIR DRAW";
       }
 
       const winnerObj = resolveWinnerObject(chosenStudent, drawNumber, supabaseAdmin);
@@ -904,9 +889,6 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
         success: true,
         winner: {
           ...winnerObj,
-          is_controlled: isControlledResult,
-          draw_type: drawType,
-          status_message: statusMessage,
           total_entries: remainingPool.length,
         },
       };
@@ -929,8 +911,6 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
       selected_at:   new Date().toISOString(),
       total_entries: validEntries.length,
       draw_number:   drawNumber,
-      is_controlled: false,
-      draw_type:     "NORMAL FAIR DRAW",
     };
 
     return { success: true, winner };
