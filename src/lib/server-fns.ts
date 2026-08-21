@@ -614,27 +614,45 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
       const { data: student, error: fetchErr } = await supabaseAdmin
         .from("students").select("id, photo_path").eq("id", data.entryId).maybeSingle();
 
-      if (fetchErr) return { success: false, error: `Failed to fetch student: ${fetchErr.message}` };
+      if (fetchErr) return { success: false, error: `Fetch error: ${fetchErr.message}` };
+      if (!student) return { success: false, error: "Entry not found in database" };
 
-      // 2. Delete storage object if a photo exists
-      if (student?.photo_path) {
-        const storagePath = normalizeStoragePath(student.photo_path);
-        if (storagePath && !storagePath.startsWith("data:")) {
-          try {
-            await supabaseAdmin.storage.from("contest-photos").remove([storagePath]);
-          } catch (err) {
-            console.warn("Storage deletion warning:", err);
+      // 2. Delete storage object if photo_path is set.
+      // photo_path is stored as a bare filename (e.g. "UTKARSH2026-0007_xxx.jpg")
+      // OR as a full public URL — handle both.
+      if (student.photo_path) {
+        const rawPath = student.photo_path as string;
+        let storageKey: string | null = null;
+
+        if (rawPath.startsWith("http")) {
+          // Extract object key from full URL
+          const marker = "/contest-photos/";
+          const idx = rawPath.indexOf(marker);
+          if (idx !== -1) storageKey = rawPath.slice(idx + marker.length);
+        } else if (!rawPath.startsWith("data:")) {
+          // Bare filename — remove any leading slashes
+          storageKey = rawPath.replace(/^\/+/, "");
+        }
+
+        if (storageKey) {
+          const { error: storageErr } = await supabaseAdmin.storage
+            .from("contest-photos").remove([storageKey]);
+          if (storageErr) {
+            console.warn("Storage deletion warning:", storageErr.message);
+            // Don't abort — still delete the DB row
           }
         }
       }
 
-      // 3. Delete the student row (try RPC first for SECURITY DEFINER bypass, then direct delete)
-      const { error: rpcErr } = await supabaseAdmin.rpc("delete_student_entry", { p_student_id: data.entryId });
-      if (rpcErr) {
-        const { error: deleteErr } = await supabaseAdmin
-          .from("students").delete().eq("id", data.entryId);
-        if (deleteErr) {
-          return { success: false, error: `Failed to delete student record: ${deleteErr.message}` };
+      // 3. Delete the student row directly (RLS allows this with anon key per migration 006)
+      const { error: deleteErr } = await supabaseAdmin
+        .from("students").delete().eq("id", data.entryId);
+
+      if (deleteErr) {
+        // Fallback: try via SECURITY DEFINER RPC
+        const { error: rpcErr } = await supabaseAdmin.rpc("delete_student_entry", { p_student_id: data.entryId });
+        if (rpcErr) {
+          return { success: false, error: `Delete failed: ${rpcErr.message}` };
         }
       }
 
@@ -699,8 +717,16 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
 
       const normalizedPhotoPath = normalizeStoragePath(chosen.photo_path);
       let photo_url = chosen.photo_path ?? "";
-      if (normalizedPhotoPath && !normalizedPhotoPath.startsWith("http") && !normalizedPhotoPath.startsWith("data:")) {
-        photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(normalizedPhotoPath).data?.publicUrl ?? photo_url;
+      if (chosen.photo_path) {
+        const rawPath = chosen.photo_path as string;
+        if (rawPath.startsWith("http") || rawPath.startsWith("data:")) {
+          photo_url = rawPath;
+        } else {
+          // Bare filename — build public URL
+          const cleanPath = rawPath.replace(/^\/+/, "");
+          const { data: pubData } = supabaseAdmin.storage.from("contest-photos").getPublicUrl(cleanPath);
+          photo_url = pubData?.publicUrl ?? rawPath;
+        }
       }
 
       // Persist winner to Supabase winners table with draw_number

@@ -87,13 +87,28 @@ function UploadPhotoPage() {
       // 1. Read file as Data URL for guaranteed display fallback
       const dataUrl = await readFileAsDataUrl(file);
 
-      // 2. Generate unique ticket number atomically from Supabase RPC / local sequence
+      // 2. Get the student's existing ticket_number from DB (already assigned at registration)
       let ticketNum = "";
       try {
-        const { data: rpcTicket } = await supabase.rpc("generate_ticket_number");
-        ticketNum = rpcTicket || "";
+        const { data: studentRow } = await supabase
+          .from("students")
+          .select("ticket_id, ticket_number")
+          .eq("id", studentId)
+          .maybeSingle();
+        if (studentRow?.ticket_id) {
+          ticketNum = studentRow.ticket_id;
+        }
       } catch (e) {
-        console.warn("RPC ticket error:", e);
+        console.warn("Could not fetch student ticket_id:", e);
+      }
+      // Fallback: try RPC
+      if (!ticketNum) {
+        try {
+          const { data: rpcTicket } = await supabase.rpc("generate_ticket_number");
+          ticketNum = rpcTicket || "";
+        } catch (e) {
+          console.warn("RPC ticket error:", e);
+        }
       }
       if (!ticketNum) {
         ticketNum = localStore.getNextTicketNumber();
@@ -101,7 +116,7 @@ function UploadPhotoPage() {
 
       let savedPhotoPath = dataUrl;
 
-      // 3. Optional Supabase storage attempt if configured
+      // 3. Upload to Supabase Storage
       try {
         const ext = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
         const storageFilePath = `${ticketNum}_${Date.now()}.${ext}`;
@@ -114,16 +129,17 @@ function UploadPhotoPage() {
           });
 
         if (!uploadErr && storageResult?.path) {
-          const pubUrl = supabase.storage.from("contest-photos").getPublicUrl(storageResult.path).data?.publicUrl;
-          if (pubUrl && !pubUrl.includes("YOUR_PROJECT_ID")) {
-            savedPhotoPath = pubUrl;
-          }
+          // Save the bare storage path (e.g. "UTKARSH2026-0007_1234567890.jpg"),
+          // NOT the public URL. This lets delete work by calling .remove([photo_path]).
+          savedPhotoPath = storageResult.path;
+        } else if (uploadErr) {
+          console.warn("Storage upload failed, using Data URL fallback:", uploadErr.message);
         }
       } catch (storageErr) {
         console.warn("Storage upload fallback to Data URL:", storageErr);
       }
 
-      // 4. Update student record with photo path (Data URL or storage URL)
+      // 4. Update student record with photo path
       const res = await createEntry({
         data: {
           student_id:    studentId,
