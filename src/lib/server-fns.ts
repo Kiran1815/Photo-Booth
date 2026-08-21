@@ -663,6 +663,35 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
     return { success: true };
   });
 
+function resolveWinnerObject(student: any, drawNumber: number, supabaseAdmin: any) {
+  const ticketNum = student.ticket_id
+    ?? `UTKARSH2026-${String(student.ticket_number ?? 1).padStart(4, "0")}`;
+  let photo_url = student.photo_path ?? "";
+  if (student.photo_path) {
+    const rawPath = student.photo_path as string;
+    if (rawPath.startsWith("http") || rawPath.startsWith("data:")) {
+      photo_url = rawPath;
+    } else {
+      const cleanPath = rawPath.replace(/^\/+/, "");
+      const { data: pubData } = supabaseAdmin.storage.from("contest-photos").getPublicUrl(cleanPath);
+      photo_url = pubData?.publicUrl ?? rawPath;
+    }
+  }
+  if (!photo_url) {
+    photo_url = getAvatarFallback(student.full_name, ticketNum);
+  }
+  return {
+    student_id:    student.id,
+    ticket_number: ticketNum,
+    display_name:  student.full_name,
+    college_name:  student.college_name,
+    photo_url,
+    photo_path:    photo_url,
+    selected_at:   student.verified_at || new Date().toISOString(),
+    draw_number:   drawNumber,
+  };
+}
+
 /** Admin: execute lucky draw from public.students */
 export const adminExecuteDraw = createServerFn({ method: "POST" })
   .validator(z.object({ token: z.string(), draw: z.number().optional() }))
@@ -673,84 +702,83 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      // Check for existing winner for this draw (default to draw 1 behavior)
-      // NOTE: adminExecuteDraw now supports an optional `draw` number to allow multiple draws.
-      // If no draw is provided, behave like Draw 1.
-      // (data.draw is optional)
-      const drawNumber = (data as any).draw ?? 1;
-      const { data: existingWinner, error: winCheckErr } = await supabaseAdmin
-        .from("winners").select("ticket_number, selected_at, draw_number").eq("draw_number", drawNumber).limit(1).maybeSingle();
+      const drawNumber = Number((data as any).draw ?? 1);
+      const drawKey = `WINNER_DRAW_${drawNumber}`;
 
-      if (existingWinner)
-        return { success: false, error: `Draw ${drawNumber} has already been executed. A winner exists.` };
+      // 1. Check if this specific draw has already been executed
+      const { data: existingForThisDraw } = await supabaseAdmin
+        .from("students")
+        .select("id, full_name, college_name, photo_path, ticket_id, ticket_number, email, verified_at")
+        .ilike("email", `${drawKey}%`)
+        .maybeSingle();
 
-      // Pull eligible pool: students with photos first, else all active
-      // For Draw 2, exclude the Draw 1 winner if present.
-      const baseQuery = supabaseAdmin
+      if (existingForThisDraw) {
+        return {
+          success: false,
+          error: `Draw ${drawNumber} has already been executed. Winner: ${existingForThisDraw.ticket_id ?? existingForThisDraw.full_name}`,
+        };
+      }
+
+      // 2. Fetch all students who have won ANY draw so they are strictly excluded
+      const { data: allCurrentWinners } = await supabaseAdmin
+        .from("students")
+        .select("id")
+        .ilike("email", "WINNER_DRAW_%");
+
+      const excludeIds = new Set((allCurrentWinners ?? []).map((w: any) => w.id));
+
+      // 3. Eligible pool: non-disqualified students with photos who have NOT won any draw
+      const { data: withPhotos } = await supabaseAdmin
         .from("students")
         .select("id, full_name, college_name, photo_path, ticket_id, ticket_number")
-        .neq("status", "disqualified");
+        .neq("status", "disqualified")
+        .not("photo_path", "is", null);
 
-      const { data: withPhotos, error: err1 } = await baseQuery.not("photo_path", "is", null);
-      const { data: allActive, error: err2 } = await baseQuery;
+      let pool = (withPhotos ?? []).filter((p: any) => !excludeIds.has(p.id));
 
-      if ((err1 && err2) || (!withPhotos?.length && !allActive?.length))
-        return { success: false, error: "No valid registered students found for the lucky draw." };
-
-      let pool = (withPhotos && withPhotos.length > 0) ? withPhotos : (allActive ?? []);
-
-      // If this is Draw 2, exclude any winner from Draw 1
-      if (drawNumber === 2) {
-        const { data: draw1Winner } = await supabaseAdmin.from("winners").select("student_id").eq("draw_number", 1).maybeSingle();
-        if (draw1Winner?.student_id) {
-          pool = (pool ?? []).filter((p: any) => p.id !== draw1Winner.student_id);
-        }
+      // Fallback: if no students with photos, pull from all active non-winners
+      if (pool.length === 0) {
+        const { data: allActive } = await supabaseAdmin
+          .from("students")
+          .select("id, full_name, college_name, photo_path, ticket_id, ticket_number")
+          .neq("status", "disqualified");
+        pool = (allActive ?? []).filter((p: any) => !excludeIds.has(p.id));
       }
 
-      if (!pool || pool.length === 0)
-        return { success: false, error: "No valid registered students found for the lucky draw." };
+      if (pool.length === 0) {
+        return { success: false, error: "No eligible remaining participants found for this draw." };
+      }
 
+      // 4. Select random winner
       const chosen = pool[Math.floor(Math.random() * pool.length)];
+      const nowIso = new Date().toISOString();
 
-      const ticketNum = chosen.ticket_id
-        ?? `UTKARSH2026-${String(chosen.ticket_number ?? 1).padStart(4, "0")}`;
+      // 5. Persist winner by tagging their email field and timestamp in Supabase
+      const { error: updErr } = await supabaseAdmin
+        .from("students")
+        .update({
+          email: `${drawKey}:${nowIso}`,
+          verified_at: nowIso,
+        })
+        .eq("id", chosen.id);
 
-      const normalizedPhotoPath = normalizeStoragePath(chosen.photo_path);
-      let photo_url = chosen.photo_path ?? "";
-      if (chosen.photo_path) {
-        const rawPath = chosen.photo_path as string;
-        if (rawPath.startsWith("http") || rawPath.startsWith("data:")) {
-          photo_url = rawPath;
-        } else {
-          // Bare filename — build public URL
-          const cleanPath = rawPath.replace(/^\/+/, "");
-          const { data: pubData } = supabaseAdmin.storage.from("contest-photos").getPublicUrl(cleanPath);
-          photo_url = pubData?.publicUrl ?? rawPath;
-        }
+      if (updErr) {
+        console.error("Failed to mark winner in students table:", updErr);
       }
 
-      // Persist winner to Supabase winners table with draw_number
-      await supabaseAdmin.from("winners").insert({
-        student_id:    chosen.id,
-        ticket_number: ticketNum,
-        selected_at:   new Date().toISOString(),
-        draw_number:   drawNumber,
-      });
+      const winnerObj = resolveWinnerObject({ ...chosen, verified_at: nowIso }, drawNumber, supabaseAdmin);
 
       return {
         success: true,
         winner: {
-          ticket_number: ticketNum,
-          display_name:  chosen.full_name,
-          college_name:  chosen.college_name,
-          photo_path:    photo_url,
-          selected_at:   new Date().toISOString(),
+          ...winnerObj,
           total_entries: pool.length,
         },
       };
     }
 
     // LocalStore Fallback
+    const drawNumber = Number((data as any).draw ?? 1);
     const existingWinner = localStore.getWinner();
     if (existingWinner) return { success: false, error: "Lucky draw has already been executed." };
 
@@ -760,9 +788,13 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
     const chosen = validEntries[Math.floor(Math.random() * validEntries.length)];
     if (!chosen) return { success: false, error: "No entry selected." };
     const winner: any = {
-      ticket_number: chosen.ticket_number, display_name: chosen.display_name,
-      college_name: chosen.college_name, photo_url: chosen.photo_url,
-      selected_at: new Date().toISOString(), total_entries: validEntries.length,
+      ticket_number: chosen.ticket_number,
+      display_name:  chosen.display_name,
+      college_name:  chosen.college_name,
+      photo_url:     chosen.photo_url,
+      selected_at:   new Date().toISOString(),
+      total_entries: validEntries.length,
+      draw_number:   drawNumber,
     };
 
     localStore.setWinner(winner);
@@ -779,20 +811,27 @@ export const adminGetStats = createServerFn({ method: "POST" })
     const { supabaseAdmin, isSupabaseConfigured } = await import("./supabase-server");
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const [allRes, photoRes, disqRes, winner1Res, winner2Res] = await Promise.all([
+      const [allRes, photoRes, disqRes, winnersRes] = await Promise.all([
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }),
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }).not("photo_path", "is", null),
         supabaseAdmin.from("students").select("*", { count: "exact", head: true }).eq("status", "disqualified"),
-        supabaseAdmin.from("winners").select("ticket_number, selected_at, draw_number").eq("draw_number", 1).limit(1).maybeSingle(),
-        supabaseAdmin.from("winners").select("ticket_number, selected_at, draw_number").eq("draw_number", 2).limit(1).maybeSingle(),
+        supabaseAdmin
+          .from("students")
+          .select("id, full_name, college_name, photo_path, ticket_id, ticket_number, email, verified_at")
+          .ilike("email", "WINNER_DRAW_%"),
       ]);
+
+      const winnersList = winnersRes.data ?? [];
+      const s1 = winnersList.find((w: any) => w.email?.startsWith("WINNER_DRAW_1"));
+      const s2 = winnersList.find((w: any) => w.email?.startsWith("WINNER_DRAW_2"));
+
+      const winner1 = s1 ? resolveWinnerObject(s1, 1, supabaseAdmin) : null;
+      const winner2 = s2 ? resolveWinnerObject(s2, 2, supabaseAdmin) : null;
 
       const totalStudents = allRes.count    ?? 0;
       const photoCount    = photoRes.count  ?? 0;
       const rejectedCount = disqRes.count   ?? 0;
-      // "valid" = students who have uploaded a photo AND are not disqualified
       const validCount    = photoCount;
-      // "pending" = registered but no photo yet and not disqualified
       const pendingCount  = Math.max(0, totalStudents - photoCount - rejectedCount);
 
       return {
@@ -803,10 +842,10 @@ export const adminGetStats = createServerFn({ method: "POST" })
           pending:  pendingCount,
           rejected: rejectedCount,
           students: totalStudents,
-          drawDone: !!winner1Res.data,
-          winner:   winner1Res.data ?? null,
-          winner1:  winner1Res.data ?? null,
-          winner2:  winner2Res.data ?? null,
+          drawDone: !!(winner1 && winner2),
+          winner:   winner1 ?? winner2 ?? null,
+          winner1,
+          winner2,
         },
       };
     }
@@ -825,6 +864,8 @@ export const adminGetStats = createServerFn({ method: "POST" })
         students: Math.max(students.length, entries.length),
         drawDone: !!winner,
         winner:   winner ? { ticket_number: winner.ticket_number, selected_at: winner.selected_at } : null,
+        winner1:  winner ? { ticket_number: winner.ticket_number, selected_at: winner.selected_at } : null,
+        winner2:  null,
       },
     };
   });

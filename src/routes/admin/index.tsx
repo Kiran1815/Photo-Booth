@@ -86,7 +86,7 @@ function AdminDashboard() {
     const res = await adminGetEntries({ data: { token, search, page, status: "all" } });
     if (res.success) { setEntries(res.entries ?? []); setTotal(res.total ?? 0); }
   };
-  useEffect(() => { if (tab === "entries") loadEntries(); }, [tab, search, page, token]);
+  useEffect(() => { if (tab === "entries" || tab === "draw") loadEntries(); }, [tab, search, page, token]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -253,14 +253,57 @@ function AdminDashboard() {
               ))}
             </div>
 
-            {stats.drawDone ? (
+            {stats.winner1 || stats.winner2 ? (
               <div className="panel p-6 border border-neon-gold/40">
-                <div className="flex items-center gap-3 mb-2">
-                  <Trophy className="h-6 w-6 text-neon-gold icon-glow-gold" />
-                  <h2 className="text-lg font-bold">Draw Completed</h2>
+                <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <Trophy className="h-6 w-6 text-neon-gold icon-glow-gold" />
+                    <div>
+                      <h2 className="text-lg font-bold">Lucky Draw Status</h2>
+                      <p className="text-xs text-muted-foreground">
+                        {stats.winner1 && stats.winner2
+                          ? "Both lucky draws completed!"
+                          : stats.winner1
+                          ? "Draw 1 completed, Draw 2 pending"
+                          : "Draw 2 completed, Draw 1 pending"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setTab("draw")}
+                    className="btn-neon rounded-full px-5 py-2 text-xs font-semibold inline-flex items-center gap-1.5"
+                  >
+                    <Trophy className="h-3.5 w-3.5" /> Manage Draws
+                  </button>
                 </div>
-                <p className="text-neon-gold font-black text-2xl">{stats.winner?.ticket_number}</p>
-                <p className="text-sm text-muted-foreground mt-1">Winner has been selected and stored permanently.</p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                  <div className={`p-4 rounded-xl border ${stats.winner1 ? "border-neon-gold/50 bg-neon-gold/5" : "border-border/40 bg-secondary/20"}`}>
+                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Draw 1 (1st Prize - ₹3,000)</p>
+                    {stats.winner1 ? (
+                      <div className="mt-2">
+                        <p className="text-xl font-black text-neon-gold">{stats.winner1.ticket_number}</p>
+                        <p className="text-sm font-semibold">{stats.winner1.display_name}</p>
+                        <p className="text-xs text-muted-foreground">{stats.winner1.college_name}</p>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-muted-foreground italic">Not executed yet</p>
+                    )}
+                  </div>
+
+                  <div className={`p-4 rounded-xl border ${stats.winner2 ? "border-cyan-400/50 bg-cyan-500/5" : "border-border/40 bg-secondary/20"}`}>
+                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Draw 2 (2nd Prize - ₹2,000)</p>
+                    {stats.winner2 ? (
+                      <div className="mt-2">
+                        <p className="text-xl font-black text-cyan-400">{stats.winner2.ticket_number}</p>
+                        <p className="text-sm font-semibold">{stats.winner2.display_name}</p>
+                        <p className="text-xs text-muted-foreground">{stats.winner2.college_name}</p>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-muted-foreground italic">Not executed yet</p>
+                    )}
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="panel p-6 border border-neon-purple/30">
@@ -269,10 +312,12 @@ function AdminDashboard() {
                   <h2 className="text-lg font-bold">Lucky Draw</h2>
                 </div>
                 <p className="text-sm text-muted-foreground mb-4">
-                  {stats.valid} valid entries eligible. Draw has not been run yet.
+                  {stats.valid} valid entries eligible. Draw 1 and Draw 2 have not been run yet.
                 </p>
-                <button onClick={() => setTab("draw")}
-                  className="btn-neon rounded-full px-6 py-2.5 text-sm font-semibold inline-flex items-center gap-2">
+                <button
+                  onClick={() => setTab("draw")}
+                  className="btn-neon rounded-full px-6 py-2.5 text-sm font-semibold inline-flex items-center gap-2"
+                >
                   <Trophy className="h-4 w-4" /> Go to Lucky Draw
                 </button>
               </div>
@@ -444,147 +489,309 @@ function AdminDashboard() {
 
         {/* ── LUCKY DRAW TAB ── */}
         {tab === "draw" && (
-          <div className="max-w-2xl mx-auto">
-            <h1 className="text-2xl font-black tracking-wide mb-8 text-center">🎰 Lucky Draw</h1>
+          <div className="max-w-4xl mx-auto">
+            <h1 className="text-2xl font-black tracking-wide mb-2 text-center">🎰 Lucky Draw</h1>
+            <p className="text-xs text-muted-foreground text-center mb-8">
+              Select winners randomly for Draw 1 (1st Prize - ₹3,000) and Draw 2 (2nd Prize - ₹2,000)
+            </p>
 
-            <div className="panel p-8 text-center">
-              <div className="mb-4 flex gap-4 justify-center">
-                {/* Show Draw 1/2 winners if present */}
-                {stats?.winner1 ? (
-                  <div className="text-center">
-                    <p className="text-[11px] text-muted-foreground">Draw 1 Winner</p>
-                    <p className="text-neon-gold font-black">{stats.winner1.ticket_number}</p>
-                  </div>
-                ) : (
-                  <div className="text-center text-muted-foreground">Draw 1: Not run</div>
-                )}
-
-                {stats?.winner2 ? (
-                  <div className="text-center">
-                    <p className="text-[11px] text-muted-foreground">Draw 2 Winner</p>
-                    <p className="text-neon-gold font-black">{stats.winner2.ticket_number}</p>
-                  </div>
-                ) : (
-                  <div className="text-center text-muted-foreground">Draw 2: Not run</div>
-                )}
+            {/* CONFIRM MODAL / STATE */}
+            {drawState === "confirm" && (
+              <div className="panel p-8 text-center max-w-md mx-auto">
+                <AlertTriangle className="mx-auto h-14 w-14 text-neon-gold icon-glow-gold mb-4" />
+                <h2 className="text-xl font-bold">Confirm Draw {selectedDrawNumber}?</h2>
+                <p className="mt-2 text-sm text-muted-foreground mb-6">
+                  This will permanently select the winner for{" "}
+                  <strong className="text-neon-gold">
+                    {selectedDrawNumber === 1 ? "Draw 1 (1st Prize - ₹3,000)" : "Draw 2 (2nd Prize - ₹2,000)"}
+                  </strong>{" "}
+                  from the eligible participants pool.
+                  <br />
+                  <span className="text-xs text-destructive mt-1 inline-block">
+                    This action cannot be undone.
+                  </span>
+                </p>
+                <div className="flex gap-4 justify-center">
+                  <button
+                    onClick={() => setDrawState("idle")}
+                    className="btn-outline-neon border rounded-full px-6 py-2.5 text-sm font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={executeDraw}
+                    className="btn-neon rounded-full px-8 py-2.5 text-sm font-black inline-flex items-center gap-2"
+                  >
+                    <Trophy className="h-4 w-4" /> Start Draw
+                  </button>
+                </div>
               </div>
-                {/* IDLE */}
-                {drawState === "idle" && (
-                  <>
+            )}
+
+            {/* COUNTDOWN */}
+            {drawState === "counting" && (
+              <div className="panel p-12 text-center max-w-md mx-auto">
+                <p className="text-8xl font-black text-neon-pink icon-glow-pink animate-pulse">{countdown}</p>
+                <p className="mt-4 text-sm font-semibold text-muted-foreground tracking-wider uppercase">
+                  Drawing Draw {selectedDrawNumber} in...
+                </p>
+              </div>
+            )}
+
+            {/* ANIMATING — Photo Wheel & Ticket Shuffle */}
+            {drawState === "animating" && (
+              <div className="panel p-8 text-center max-w-md mx-auto">
+                <p className="text-[11px] tracking-widest text-muted-foreground uppercase mb-4 animate-pulse">
+                  Shuffling eligible entries for Draw {selectedDrawNumber}…
+                </p>
+                {flashPhoto ? (
+                  <div className="relative mx-auto mb-4 w-48 h-48 rounded-2xl overflow-hidden border-2 border-neon-pink/60 shadow-[0_0_40px_rgba(236,72,153,0.4)]">
+                    <img
+                      key={flashPhoto}
+                      src={flashPhoto}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      style={{ animation: "pulse 0.12s ease-in-out" }}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-background/40 to-transparent" />
+                  </div>
+                ) : (
+                  <div className="mx-auto mb-4 w-48 h-48 rounded-2xl border-2 border-neon-pink/60 bg-secondary/30 flex items-center justify-center">
+                    <Shuffle className="h-12 w-12 text-neon-purple animate-spin" />
+                  </div>
+                )}
+                <p className="text-2xl font-black text-neon-pink icon-glow-pink font-mono animate-pulse">
+                  {flashTicket}
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">Selecting winner...</p>
+              </div>
+            )}
+
+            {/* DONE / WINNER CELEBRATION */}
+            {drawState === "done" && winner && (
+              <div className="animate-in fade-in zoom-in duration-700 max-w-md mx-auto text-center">
+                <div className="text-5xl mb-3">🎉</div>
+                <h2 className="text-2xl font-black text-neon-gold icon-glow-gold mb-1">
+                  DRAW {winner.draw_number ?? selectedDrawNumber} WINNER SELECTED!
+                </h2>
+                <p className="text-xs text-muted-foreground mb-4">
+                  {(winner.draw_number ?? selectedDrawNumber) === 1 ? "1st Prize (₹3,000)" : "2nd Prize (₹2,000)"}
+                </p>
+
+                <div className="panel p-6 border-2 border-neon-gold/70 shadow-[0_0_30px_rgba(234,179,8,0.25)] rounded-2xl flex flex-col items-center bg-gradient-to-b from-secondary/40 to-background">
+                  <div className="relative w-36 h-36 rounded-2xl overflow-hidden border-2 border-border/60 mb-4 bg-secondary/40 shadow-inner">
+                    <img
+                      src={winner.photo_url || winner.photo_path || getAvatarFallback(winner.display_name, winner.ticket_number)}
+                      alt={winner.display_name}
+                      className="w-full h-full object-cover"
+                      onError={(evt) => {
+                        (evt.target as HTMLImageElement).src = getAvatarFallback(winner.display_name, winner.ticket_number);
+                      }}
+                    />
+                  </div>
+                  <p className="font-mono text-2xl font-black text-neon-gold tracking-wider">{winner.ticket_number}</p>
+                  <h3 className="mt-1 text-lg font-bold text-foreground">{winner.display_name}</h3>
+                  <p className="text-xs text-muted-foreground">{winner.college_name}</p>
+                  <p className="mt-3 text-[11px] text-muted-foreground">
+                    Recorded permanently. Total entries considered: {winner.total_entries}
+                  </p>
+                </div>
+
+                <div className="mt-6 flex justify-center gap-4">
+                  <button
+                    onClick={() => { setDrawState("idle"); setWinner(null); }}
+                    className="btn-neon rounded-full px-8 py-3 text-sm font-black inline-flex items-center gap-2"
+                  >
+                    {(!stats?.winner1 || !stats?.winner2)
+                      ? `Proceed to Draw ${(winner.draw_number ?? selectedDrawNumber) === 1 ? 2 : 1} →`
+                      : "View All Winners Side-by-Side →"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ERROR */}
+            {drawState === "error" && (
+              <div className="panel p-8 text-center max-w-md mx-auto">
+                <AlertTriangle className="mx-auto h-12 w-12 text-destructive mb-4" />
+                <h2 className="text-lg font-bold text-destructive">Draw Failed</h2>
+                <p className="mt-2 text-sm text-muted-foreground mb-4">{drawError}</p>
+                <button
+                  onClick={() => { setDrawState("idle"); setDrawError(null); }}
+                  className="btn-outline-neon border rounded-full px-6 py-2.5 text-sm font-semibold"
+                >
+                  Try Again
+                </button>
+              </div>
+            )}
+
+            {/* IDLE: DASHBOARD OF DRAWS */}
+            {drawState === "idle" && (
+              <div className="space-y-6">
+                {/* 1. BOTH DRAWS COMPLETED -> SIDE BY SIDE */}
+                {stats?.winner1 && stats?.winner2 && (
+                  <div className="space-y-6">
+                    <div className="p-4 rounded-xl border border-green-500/40 bg-green-500/10 text-center">
+                      <p className="text-sm font-semibold text-green-400">
+                        🎉 Both Lucky Draws Completed! Winners are finalized and recorded in Supabase.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Winner 1 Card */}
+                      <div className="panel p-6 border-2 border-neon-gold/70 shadow-[0_0_30px_rgba(234,179,8,0.25)] rounded-2xl flex flex-col items-center text-center relative overflow-hidden bg-gradient-to-b from-secondary/40 to-background">
+                        <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-neon-gold/20 text-neon-gold border border-neon-gold/40">
+                          🥇 1st Prize Winner (Draw 1) • ₹3,000
+                        </span>
+                        <div className="relative w-36 h-36 rounded-2xl overflow-hidden border-2 border-border/60 mb-4 bg-secondary/40 shadow-inner">
+                          <img
+                            src={stats.winner1.photo_url || stats.winner1.photo_path || getAvatarFallback(stats.winner1.display_name, stats.winner1.ticket_number)}
+                            alt={stats.winner1.display_name}
+                            className="w-full h-full object-cover"
+                            onError={(evt) => {
+                              (evt.target as HTMLImageElement).src = getAvatarFallback(stats.winner1.display_name, stats.winner1.ticket_number);
+                            }}
+                          />
+                        </div>
+                        <p className="font-mono text-2xl font-black text-neon-gold tracking-wider">{stats.winner1.ticket_number}</p>
+                        <h3 className="mt-1 text-lg font-bold text-foreground">{stats.winner1.display_name}</h3>
+                        <p className="text-xs text-muted-foreground">{stats.winner1.college_name}</p>
+                      </div>
+
+                      {/* Winner 2 Card */}
+                      <div className="panel p-6 border-2 border-cyan-400/70 shadow-[0_0_30px_rgba(6,182,212,0.25)] rounded-2xl flex flex-col items-center text-center relative overflow-hidden bg-gradient-to-b from-secondary/40 to-background">
+                        <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">
+                          🥈 2nd Prize Winner (Draw 2) • ₹2,000
+                        </span>
+                        <div className="relative w-36 h-36 rounded-2xl overflow-hidden border-2 border-border/60 mb-4 bg-secondary/40 shadow-inner">
+                          <img
+                            src={stats.winner2.photo_url || stats.winner2.photo_path || getAvatarFallback(stats.winner2.display_name, stats.winner2.ticket_number)}
+                            alt={stats.winner2.display_name}
+                            className="w-full h-full object-cover"
+                            onError={(evt) => {
+                              (evt.target as HTMLImageElement).src = getAvatarFallback(stats.winner2.display_name, stats.winner2.ticket_number);
+                            }}
+                          />
+                        </div>
+                        <p className="font-mono text-2xl font-black text-cyan-400 tracking-wider">{stats.winner2.ticket_number}</p>
+                        <h3 className="mt-1 text-lg font-bold text-foreground">{stats.winner2.display_name}</h3>
+                        <p className="text-xs text-muted-foreground">{stats.winner2.college_name}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. DRAW 1 DONE, DRAW 2 PENDING */}
+                {stats?.winner1 && !stats?.winner2 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                    {/* Draw 1 Winner Card */}
+                    <div className="panel p-6 border-2 border-neon-gold/70 shadow-[0_0_30px_rgba(234,179,8,0.25)] rounded-2xl flex flex-col items-center text-center bg-gradient-to-b from-secondary/40 to-background">
+                      <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-neon-gold/20 text-neon-gold border border-neon-gold/40">
+                        🥇 1st Prize Winner (Draw 1) • ₹3,000
+                      </span>
+                      <div className="relative w-32 h-32 rounded-2xl overflow-hidden border-2 border-border/60 mb-3 bg-secondary/40 shadow-inner">
+                        <img
+                          src={stats.winner1.photo_url || stats.winner1.photo_path || getAvatarFallback(stats.winner1.display_name, stats.winner1.ticket_number)}
+                          alt={stats.winner1.display_name}
+                          className="w-full h-full object-cover"
+                          onError={(evt) => {
+                            (evt.target as HTMLImageElement).src = getAvatarFallback(stats.winner1.display_name, stats.winner1.ticket_number);
+                          }}
+                        />
+                      </div>
+                      <p className="font-mono text-xl font-black text-neon-gold tracking-wider">{stats.winner1.ticket_number}</p>
+                      <h3 className="mt-1 text-base font-bold text-foreground">{stats.winner1.display_name}</h3>
+                      <p className="text-xs text-muted-foreground">{stats.winner1.college_name}</p>
+                    </div>
+
+                    {/* Draw 2 Action Card */}
+                    <div className="panel p-8 border border-cyan-400/40 rounded-2xl flex flex-col items-center text-center bg-secondary/20 min-h-[320px] justify-center">
+                      <span className="text-4xl mb-2">🥈</span>
+                      <h3 className="text-lg font-black text-foreground">Draw 2 (2nd Prize)</h3>
+                      <p className="text-xs font-semibold text-cyan-400 mb-3">Prize Pool: ₹2,000</p>
+                      <p className="text-xs text-muted-foreground mb-6 max-w-xs leading-relaxed">
+                        Draw 1 is complete! Click below to draw the 2nd prize winner. The Draw 1 winner ({stats.winner1.ticket_number}) is excluded automatically.
+                      </p>
+                      <button
+                        onClick={() => startDrawFlow(2)}
+                        className="btn-neon rounded-full px-8 py-3 text-sm font-black inline-flex items-center gap-2"
+                      >
+                        <Shuffle className="h-4 w-4" /> EXECUTE DRAW 2
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. DRAW 2 DONE, DRAW 1 PENDING */}
+                {!stats?.winner1 && stats?.winner2 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                    {/* Draw 1 Action Card */}
+                    <div className="panel p-8 border border-neon-gold/40 rounded-2xl flex flex-col items-center text-center bg-secondary/20 min-h-[320px] justify-center">
+                      <span className="text-4xl mb-2">🥇</span>
+                      <h3 className="text-lg font-black text-foreground">Draw 1 (1st Prize)</h3>
+                      <p className="text-xs font-semibold text-neon-gold mb-3">Prize Pool: ₹3,000</p>
+                      <p className="text-xs text-muted-foreground mb-6 max-w-xs leading-relaxed">
+                        Draw 2 is complete! Click below to draw the 1st prize winner. The Draw 2 winner ({stats.winner2.ticket_number}) is excluded automatically.
+                      </p>
+                      <button
+                        onClick={() => startDrawFlow(1)}
+                        className="btn-neon rounded-full px-8 py-3 text-sm font-black inline-flex items-center gap-2"
+                      >
+                        <Shuffle className="h-4 w-4" /> EXECUTE DRAW 1
+                      </button>
+                    </div>
+
+                    {/* Draw 2 Winner Card */}
+                    <div className="panel p-6 border-2 border-cyan-400/70 shadow-[0_0_30px_rgba(6,182,212,0.25)] rounded-2xl flex flex-col items-center text-center bg-gradient-to-b from-secondary/40 to-background">
+                      <span className="inline-block rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">
+                        🥈 2nd Prize Winner (Draw 2) • ₹2,000
+                      </span>
+                      <div className="relative w-32 h-32 rounded-2xl overflow-hidden border-2 border-border/60 mb-3 bg-secondary/40 shadow-inner">
+                        <img
+                          src={stats.winner2.photo_url || stats.winner2.photo_path || getAvatarFallback(stats.winner2.display_name, stats.winner2.ticket_number)}
+                          alt={stats.winner2.display_name}
+                          className="w-full h-full object-cover"
+                          onError={(evt) => {
+                            (evt.target as HTMLImageElement).src = getAvatarFallback(stats.winner2.display_name, stats.winner2.ticket_number);
+                          }}
+                        />
+                      </div>
+                      <p className="font-mono text-xl font-black text-cyan-400 tracking-wider">{stats.winner2.ticket_number}</p>
+                      <h3 className="mt-1 text-base font-bold text-foreground">{stats.winner2.display_name}</h3>
+                      <p className="text-xs text-muted-foreground">{stats.winner2.college_name}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. NEITHER DRAW DONE YET */}
+                {!stats?.winner1 && !stats?.winner2 && (
+                  <div className="panel p-8 text-center max-w-xl mx-auto">
                     <Shuffle className="mx-auto h-14 w-14 text-neon-purple icon-glow-purple mb-4 animate-pulse" />
                     <h2 className="text-xl font-bold">Ready to Draw</h2>
                     <p className="mt-2 text-sm text-muted-foreground mb-2">
                       <strong className="text-foreground">{stats?.valid ?? 0}</strong> valid entries eligible.
                     </p>
                     <p className="text-[11px] text-muted-foreground mb-6">
-                      Winner is selected randomly by the server. Every entry has equal probability.
+                      Winner is selected randomly by the server. You can execute Draw 1 or Draw 2 in any order.
                     </p>
-                    <div className="flex gap-4 justify-center">
-                      <button onClick={() => startDrawFlow(1)}
-                        className="btn-neon rounded-full px-8 py-3 text-base font-black inline-flex items-center gap-2">
-                        DRAW 1
+                    <div className="flex flex-wrap gap-4 justify-center">
+                      <button
+                        onClick={() => startDrawFlow(1)}
+                        className="btn-neon rounded-full px-8 py-3 text-sm font-black inline-flex items-center gap-2"
+                      >
+                        🥇 DRAW 1 (1st Prize - ₹3,000)
                       </button>
-                      <button onClick={() => startDrawFlow(2)}
-                        className="btn-neon rounded-full px-8 py-3 text-base font-black inline-flex items-center gap-2">
-                        DRAW 2
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {/* CONFIRM */}
-                {drawState === "confirm" && (
-                  <>
-                    <AlertTriangle className="mx-auto h-14 w-14 text-neon-gold icon-glow-gold mb-4" />
-                    <h2 className="text-xl font-bold">Are You Sure?</h2>
-                    <p className="mt-2 text-sm text-muted-foreground mb-6">
-                      This will permanently select ONE winner for <strong>DRAW {selectedDrawNumber}</strong> from all {stats?.valid ?? 0} valid entries.
-                      <br />This action <strong className="text-foreground">cannot be undone</strong>.
-                    </p>
-                    <div className="flex gap-4 justify-center">
-                      <button onClick={() => setDrawState("idle")}
-                        className="btn-outline-neon border rounded-full px-6 py-3 text-sm font-semibold">
-                        Cancel
-                      </button>
-                      <button onClick={executeDraw}
-                        className="btn-neon rounded-full px-8 py-3 text-sm font-black inline-flex items-center gap-2">
-                        <Trophy className="h-4 w-4" /> Confirm Draw
+                      <button
+                        onClick={() => startDrawFlow(2)}
+                        className="btn-neon rounded-full px-8 py-3 text-sm font-black inline-flex items-center gap-2"
+                      >
+                        🥈 DRAW 2 (2nd Prize - ₹2,000)
                       </button>
                     </div>
-                  </>
-                )}
-
-                {/* COUNTDOWN */}
-                {drawState === "counting" && (
-                  <div className="py-8">
-                    <p className="text-8xl font-black text-neon-pink icon-glow-pink animate-pulse">{countdown}</p>
-                    <p className="mt-4 text-muted-foreground">Drawing in...</p>
                   </div>
                 )}
-
-                {/* ANIMATING — photo shuffle */}
-                {drawState === "animating" && (
-                  <div className="py-6">
-                    <p className="text-[11px] tracking-widest text-muted-foreground uppercase mb-4 animate-pulse">
-                      Shuffling all entries…
-                    </p>
-                    {/* Photo wheel */}
-                    {flashPhoto ? (
-                      <div className="relative mx-auto mb-4 w-48 h-48 rounded-2xl overflow-hidden border-2 border-neon-pink/60 shadow-[0_0_40px_rgba(236,72,153,0.4)]">
-                        <img
-                          key={flashPhoto}
-                          src={flashPhoto}
-                          alt=""
-                          className="w-full h-full object-cover"
-                          style={{ animation: "pulse 0.12s ease-in-out" }}
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-background/40 to-transparent" />
-                      </div>
-                    ) : (
-                      <div className="mx-auto mb-4 w-48 h-48 rounded-2xl border-2 border-neon-pink/60 bg-secondary/30 flex items-center justify-center">
-                        <Shuffle className="h-12 w-12 text-neon-purple animate-spin" />
-                      </div>
-                    )}
-                    <p className="text-2xl font-black text-neon-pink icon-glow-pink font-mono animate-pulse">
-                      {flashTicket}
-                    </p>
-                    <p className="mt-2 text-sm text-muted-foreground">Selecting winner...</p>
-                  </div>
-                )}
-
-                {/* DONE */}
-                {drawState === "done" && winner && (
-                  <div className="animate-in fade-in zoom-in duration-700">
-                    <div className="text-5xl mb-4">🎉</div>
-                    <h2 className="text-2xl font-black text-neon-gold icon-glow-gold">WINNER!</h2>
-                    <div className="mt-4 rounded-2xl border-2 border-neon-gold/60 bg-gradient-to-br from-yellow-900/20 to-background p-6">
-                      <p className="text-3xl font-black text-neon-gold tracking-wider">{winner.ticket_number}</p>
-                      <p className="mt-2 text-lg font-bold">{winner.display_name}</p>
-                      <p className="text-sm text-muted-foreground">{winner.college_name}</p>
-                    </div>
-                    {(winner.photo_url || winner.photo_path) && (
-                      <img src={winner.photo_url || winner.photo_path} alt="Winner"
-                        className="mx-auto mt-4 w-48 h-48 object-cover rounded-xl border-2 border-neon-gold/60" />
-                    )}
-                    <p className="mt-4 text-[12px] text-muted-foreground">
-                      Winner recorded permanently. Total entries: {winner.total_entries}
-                    </p>
-                  </div>
-                )}
-
-                {/* ERROR */}
-                {drawState === "error" && (
-                  <div>
-                    <AlertTriangle className="mx-auto h-12 w-12 text-destructive mb-4" />
-                    <h2 className="text-lg font-bold text-destructive">Draw Failed</h2>
-                    <p className="mt-2 text-sm text-muted-foreground mb-4">{drawError}</p>
-                    <button onClick={() => { setDrawState("idle"); setDrawError(null); }}
-                      className="btn-outline-neon border rounded-full px-6 py-3 text-sm font-semibold">
-                      Try Again
-                    </button>
-                  </div>
-                )}
-            </div>
+              </div>
+            )}
           </div>
         )}
       </div>
