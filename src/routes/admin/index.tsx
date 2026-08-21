@@ -126,6 +126,7 @@ function AdminDashboard() {
   const startDrawFlow = (drawNum: number) => { setSelectedDrawNumber(drawNum); setDrawState("confirm"); };
 
   const getEntryPhotoUrl = (entry: any) => {
+    if (!entry) return null;
     const raw = entry.photo_url || entry.photo_path;
     if (!raw) return null;
     if (raw.startsWith("http") || raw.startsWith("data:")) return raw;
@@ -137,6 +138,7 @@ function AdminDashboard() {
     } catch { /* ignore */ }
     return raw;
   };
+
 
   const executeDraw = async () => {
     if (!token) return;
@@ -165,7 +167,8 @@ function AdminDashboard() {
       const rand = String(Math.floor(Math.random() * 9999)).padStart(4, "0");
       setFlashTicket(`UTKARSH2026-${rand}`);
       if (entryPhotos.length > 0) {
-        setFlashPhoto(entryPhotos[photoIdx % entryPhotos.length]);
+        const photo = entryPhotos[photoIdx % entryPhotos.length];
+        if (photo) setFlashPhoto(photo);
         photoIdx++;
       }
     }, 120);

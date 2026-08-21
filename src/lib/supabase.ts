@@ -11,17 +11,17 @@ import { localStore } from "./local-store";
 const DEFAULT_SUPABASE_URL = "https://ddbxwyxgyjlpthenvbzc.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_kce73wwFdrmRfqtX0dWtHg_SAEcywz1";
 
-let rawUrl = (import.meta.env.VITE_SUPABASE_URL ||
-  import.meta.env.SUPABASE_URL ||
+let rawUrl = (import.meta.env["VITE_SUPABASE_URL"] ||
+  import.meta.env["SUPABASE_URL"] ||
   DEFAULT_SUPABASE_URL) as string;
 
 if (rawUrl.endsWith("/")) rawUrl = rawUrl.slice(0, -1);
 if (rawUrl.endsWith("/rest/v1")) rawUrl = rawUrl.slice(0, -8);
 const supabaseUrl = rawUrl;
 
-const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  import.meta.env.SUPABASE_ANON_KEY ||
-  import.meta.env.SUPABASE_PUBLISHABLE_KEY ||
+const supabaseAnonKey = (import.meta.env["VITE_SUPABASE_ANON_KEY"] ||
+  import.meta.env["SUPABASE_ANON_KEY"] ||
+  import.meta.env["SUPABASE_PUBLISHABLE_KEY"] ||
   DEFAULT_SUPABASE_ANON_KEY) as string;
 
 const isPlaceholderUrl =

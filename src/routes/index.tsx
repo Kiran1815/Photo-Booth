@@ -273,7 +273,7 @@ function Index() {
             </span>
             <div>
               <p className="text-[10px] tracking-[0.18em] text-muted-foreground">{s.label}</p>
-              <p className={`mt-1 text-xl font-bold ${s.valueClassName || ""}`}>{s.value}</p>
+              <p className={`mt-1 text-xl font-bold ${(s as any).valueClassName || ""}`}>{s.value}</p>
               <p className="mt-0.5 text-[11px] text-muted-foreground">{s.sub}</p>
             </div>
           </div>

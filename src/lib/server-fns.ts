@@ -46,6 +46,41 @@ function normalizeStoragePath(url: string | null): string | null {
   return storagePath.replace(/^\/+/, "");
 }
 
+export function getAvatarFallback(name: string = "Student", ticket: string = ""): string {
+  const initials = (name || "Student")
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "UT";
+  const colors = [
+    ["#ec4899", "#8b5cf6"],
+    ["#3b82f6", "#06b6d4"],
+    ["#f59e0b", "#ef4444"],
+    ["#10b981", "#3b82f6"],
+    ["#8b5cf6", "#ec4899"],
+  ];
+  const charCodeSum = (name + ticket).split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const pair = colors[charCodeSum % colors.length] ?? ["#ec4899", "#8b5cf6"];
+  const [c1, c2] = pair;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+    <defs>
+      <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${c1}" />
+        <stop offset="100%" stop-color="${c2}" />
+      </linearGradient>
+    </defs>
+    <rect width="300" height="300" fill="url(#g)" />
+    <circle cx="150" cy="120" r="45" fill="rgba(255,255,255,0.25)" />
+    <path d="M75 250 C75 190, 225 190, 225 250 Z" fill="rgba(255,255,255,0.25)" />
+    <text x="150" y="135" font-family="sans-serif" font-size="36" font-weight="bold" fill="#ffffff" text-anchor="middle">${initials}</text>
+    <text x="150" y="275" font-family="monospace" font-size="14" fill="rgba(255,255,255,0.85)" text-anchor="middle">${ticket}</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+
 // ── Public Functions ──────────────────────────────────
 
 /** Register a new student in public.students */
@@ -192,14 +227,19 @@ export const getStudentProfile = createServerFn({ method: "GET" })
       if (error || !student) return { success: false, error: "Student not found." };
 
       let photo_url: string | null = null;
+      const ticketId = student.ticket_id
+        ?? `UTKARSH2026-${String(student.ticket_number ?? 1).padStart(4, "0")}`;
+
       if (student.photo_path) {
-        photo_url = student.photo_path.startsWith("http")
+        photo_url = student.photo_path.startsWith("http") || student.photo_path.startsWith("data:")
           ? student.photo_path
           : supabaseAdmin.storage.from("contest-photos").getPublicUrl(student.photo_path).data?.publicUrl ?? null;
       }
 
-      const ticketId = student.ticket_id
-        ?? `UTKARSH2026-${String(student.ticket_number ?? 1).padStart(4, "0")}`;
+      if (!photo_url) {
+        photo_url = getAvatarFallback(student.full_name, ticketId);
+      }
+
 
       return {
         success: true,
@@ -247,12 +287,16 @@ export const getGallery = createServerFn({ method: "GET" })
 
       const items = (rows ?? []).map((s: any) => {
         let photo_url = s.photo_path ?? "";
+        const ticket_number = s.ticket_id ?? `UTKARSH2026-${String(s.ticket_number ?? 1).padStart(4, "0")}`;
         if (photo_url && !photo_url.startsWith("http") && !photo_url.startsWith("data:")) {
           photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(s.photo_path).data?.publicUrl ?? photo_url;
         }
+        if (!photo_url) {
+          photo_url = getAvatarFallback(s.full_name, ticket_number);
+        }
         return {
           id:            s.id,
-          ticket_number: s.ticket_id ?? `UTKARSH2026-${String(s.ticket_number ?? 1).padStart(4, "0")}`,
+          ticket_number,
           photo_url,
           display_name:  s.full_name ?? "Participant",
           submitted_at:  s.created_at,
@@ -435,9 +479,10 @@ export const adminGetEntries = createServerFn({ method: "POST" })
       const items = await Promise.all((rows ?? []).map(async (s: any) => {
         let photo_url: string | null = s.photo_path ?? null;
         const storagePath = normalizeStoragePath(s.photo_path);
+        const ticketNumber = s.ticket_id ?? `UTKARSH2026-${String(s.ticket_number ?? 1).padStart(4, "0")}`;
 
         if (storagePath && !storagePath.startsWith("http") && !storagePath.startsWith("data:")) {
-          const { data: signedData, error: signedError } = await supabaseAdmin
+          const { data: signedData } = await supabaseAdmin
             .storage.from("contest-photos").createSignedUrl(storagePath, 60 * 60);
           if (signedData?.signedUrl) {
             photo_url = signedData.signedUrl;
@@ -446,13 +491,17 @@ export const adminGetEntries = createServerFn({ method: "POST" })
           }
         }
 
+        if (!photo_url) {
+          photo_url = getAvatarFallback(s.full_name, ticketNumber);
+        }
+
         const displayStatus = s.status === "disqualified" ? "rejected"
           : (s.status === "active" || s.status === "valid") ? "valid"
           : (s.status ?? "valid");
 
         return {
           id:            s.id,
-          ticket_number: s.ticket_id ?? `UTKARSH2026-${String(s.ticket_number ?? 1).padStart(4, "0")}`,
+          ticket_number: ticketNumber,
           status:        displayStatus,
           is_valid:      displayStatus === "valid",
           submitted_at:  s.created_at,
@@ -555,11 +604,8 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
             return { success: false, error: `Failed to delete storage photo: ${storageErr.message}` };
           }
         }
-        if (storageErr) {
-          console.error("Storage delete error:", storageErr);
-          return { success: false, error: `Failed to delete storage photo: ${storageErr.message}` };
-        }
       }
+
 
       // 3. Delete the student row
       const { error: deleteErr } = await supabaseAdmin
@@ -660,12 +706,14 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
     const validEntries = localStore.getEntries().filter((e) => e.is_valid && e.status === "valid");
     if (validEntries.length === 0) return { success: false, error: "No valid entries found for the lucky draw." };
 
-    const chosen  = validEntries[Math.floor(Math.random() * validEntries.length)];
+    const chosen = validEntries[Math.floor(Math.random() * validEntries.length)];
+    if (!chosen) return { success: false, error: "No entry selected." };
     const winner: any = {
       ticket_number: chosen.ticket_number, display_name: chosen.display_name,
       college_name: chosen.college_name, photo_url: chosen.photo_url,
       selected_at: new Date().toISOString(), total_entries: validEntries.length,
     };
+
     localStore.setWinner(winner);
     return { success: true, winner };
   });

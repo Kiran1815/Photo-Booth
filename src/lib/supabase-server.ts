@@ -10,16 +10,16 @@ import type { Database } from "./database.types";
 const DEFAULT_SUPABASE_URL = "https://ddbxwyxgyjlpthenvbzc.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_kce73wwFdrmRfqtX0dWtHg_SAEcywz1";
 
-let rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+let rawUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"] || DEFAULT_SUPABASE_URL;
 if (rawUrl.endsWith("/")) rawUrl = rawUrl.slice(0, -1);
 if (rawUrl.endsWith("/rest/v1")) rawUrl = rawUrl.slice(0, -8);
 const supabaseUrl = rawUrl;
 
 const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  process.env.SUPABASE_PUBLISHABLE_KEY ||
+  process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+  process.env["SUPABASE_ANON_KEY"] ||
+  process.env["VITE_SUPABASE_ANON_KEY"] ||
+  process.env["SUPABASE_PUBLISHABLE_KEY"] ||
   DEFAULT_SUPABASE_ANON_KEY;
 
 const isPlaceholderUrl =
