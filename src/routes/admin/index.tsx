@@ -12,6 +12,7 @@ import {
   adminUpdateEntry,
   adminDeleteEntry,
   adminExecuteDraw,
+  getAvatarFallback,
 } from "@/lib/server-fns";
 import utkarshLogoFont from "@/assets/utkarsh-logo-font.jpg";
 
@@ -128,15 +129,16 @@ function AdminDashboard() {
   const getEntryPhotoUrl = (entry: any) => {
     if (!entry) return null;
     const raw = entry.photo_url || entry.photo_path;
-    if (!raw) return null;
-    if (raw.startsWith("http") || raw.startsWith("data:")) return raw;
-    try {
-      const pubUrl = supabase.storage.from("contest-photos").getPublicUrl(raw).data?.publicUrl;
-      if (pubUrl && !pubUrl.includes("YOUR_PROJECT_ID")) {
-        return pubUrl;
-      }
-    } catch { /* ignore */ }
-    return raw;
+    if (raw && (raw.startsWith("http") || raw.startsWith("data:"))) return raw;
+    if (raw) {
+      try {
+        const pubUrl = supabase.storage.from("contest-photos").getPublicUrl(raw).data?.publicUrl;
+        if (pubUrl && !pubUrl.includes("YOUR_PROJECT_ID")) {
+          return pubUrl;
+        }
+      } catch { /* ignore */ }
+    }
+    return getAvatarFallback(entry.students?.full_name || entry.display_name, entry.ticket_number);
   };
 
 
@@ -303,6 +305,10 @@ function AdminDashboard() {
                           src={photoSrc}
                           alt={e.ticket_number}
                           className="w-full aspect-square object-cover"
+                          onError={(evt) => {
+                            const fallback = getAvatarFallback(e.students?.full_name || e.display_name, e.ticket_number);
+                            (evt.target as HTMLImageElement).src = fallback;
+                          }}
                         />
                       ) : (
                         <div className="w-full aspect-square bg-secondary/40 flex items-center justify-center text-muted-foreground text-xs">
@@ -354,7 +360,15 @@ function AdminDashboard() {
                       <tr key={e.id} className="hover:bg-secondary/30 transition-colors">
                         <td className="px-4 py-3">
                           {photoSrc ? (
-                            <img src={photoSrc} alt="" className="h-10 w-10 object-cover rounded-lg border border-border/40" />
+                            <img
+                              src={photoSrc}
+                              alt=""
+                              className="h-10 w-10 object-cover rounded-lg border border-border/40"
+                              onError={(evt) => {
+                                const fallback = getAvatarFallback(e.students?.full_name || e.display_name, e.ticket_number);
+                                (evt.target as HTMLImageElement).src = fallback;
+                              }}
+                            />
                           ) : (
                             <div className="h-10 w-10 rounded-lg bg-secondary/40 flex items-center justify-center text-muted-foreground text-[9px]">N/A</div>
                           )}

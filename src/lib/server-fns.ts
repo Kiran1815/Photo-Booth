@@ -167,16 +167,23 @@ export const createEntry = createServerFn({ method: "POST" })
       // Save the storage object path into public.students. The UI sends a
       // storage object path like "UTKARSH2026-0001_123.jpg" rather than the
       // public URL; the public URL is derived when needed.
-      const { data: updated, error: updateErr } = await supabaseAdmin
+      let { data: updated, error: updateErr } = await supabaseAdmin
         .from("students")
         .update({ photo_path: data.photo_path })
         .eq("id", data.student_id)
         .select("id, ticket_id, ticket_number, photo_path")
         .maybeSingle();
 
-      if (updateErr) {
-        console.error("Update photo_path error:", updateErr);
-        return { success: false, error: `Failed to save photo in database: ${updateErr.message}` };
+      if (updateErr || !updated) {
+        // Try SECURITY DEFINER RPC fallback
+        const { error: rpcErr } = await supabaseAdmin.rpc("update_student_photo", {
+          p_student_id: data.student_id,
+          p_photo_path: data.photo_path,
+        });
+        if (rpcErr && updateErr) {
+          console.error("Update photo_path error:", updateErr);
+          return { success: false, error: `Failed to save photo in database: ${updateErr.message}` };
+        }
       }
 
       const ticketId = updated?.ticket_id
@@ -477,20 +484,36 @@ export const adminGetEntries = createServerFn({ method: "POST" })
       if (error) return { success: false, error: error.message };
 
       const items = await Promise.all((rows ?? []).map(async (s: any) => {
-        let photo_url: string | null = s.photo_path ?? null;
-        const storagePath = normalizeStoragePath(s.photo_path);
         const ticketNumber = s.ticket_id ?? `UTKARSH2026-${String(s.ticket_number ?? 1).padStart(4, "0")}`;
+        let photo_url: string | null = null;
 
-        if (storagePath && !storagePath.startsWith("http") && !storagePath.startsWith("data:")) {
-          const { data: signedData } = await supabaseAdmin
-            .storage.from("contest-photos").createSignedUrl(storagePath, 60 * 60);
-          if (signedData?.signedUrl) {
-            photo_url = signedData.signedUrl;
+        if (s.photo_path) {
+          const rawPath = s.photo_path as string;
+          if (rawPath.startsWith("data:")) {
+            // Data URL — use directly
+            photo_url = rawPath;
+          } else if (rawPath.startsWith("http")) {
+            // Already a full URL
+            photo_url = rawPath;
           } else {
-            photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(storagePath).data?.publicUrl ?? photo_url;
+            // Storage object path — resolve to public URL
+            const cleanPath = rawPath.replace(/^\/+/, "");
+            const { data: pubData } = supabaseAdmin.storage
+              .from("contest-photos")
+              .getPublicUrl(cleanPath);
+            if (pubData?.publicUrl && !pubData.publicUrl.includes("YOUR_PROJECT_ID")) {
+              photo_url = pubData.publicUrl;
+            } else {
+              // Try signed URL as fallback
+              const { data: signed } = await supabaseAdmin.storage
+                .from("contest-photos")
+                .createSignedUrl(cleanPath, 3600);
+              photo_url = signed?.signedUrl ?? null;
+            }
           }
         }
 
+        // Fallback to gradient avatar if no photo resolved
         if (!photo_url) {
           photo_url = getAvatarFallback(s.full_name, ticketNumber);
         }
@@ -596,22 +619,24 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
       // 2. Delete storage object if a photo exists
       if (student?.photo_path) {
         const storagePath = normalizeStoragePath(student.photo_path);
-        if (storagePath) {
-          const { error: storageErr } = await supabaseAdmin.storage
-            .from("contest-photos").remove([storagePath]);
-          if (storageErr) {
-            console.error("Storage delete error:", storageErr);
-            return { success: false, error: `Failed to delete storage photo: ${storageErr.message}` };
+        if (storagePath && !storagePath.startsWith("data:")) {
+          try {
+            await supabaseAdmin.storage.from("contest-photos").remove([storagePath]);
+          } catch (err) {
+            console.warn("Storage deletion warning:", err);
           }
         }
       }
 
-
-      // 3. Delete the student row
-      const { error: deleteErr } = await supabaseAdmin
-        .from("students").delete().eq("id", data.entryId);
-
-      if (deleteErr) return { success: false, error: `Failed to delete student record: ${deleteErr.message}` };
+      // 3. Delete the student row (try RPC first for SECURITY DEFINER bypass, then direct delete)
+      const { error: rpcErr } = await supabaseAdmin.rpc("delete_student_entry", { p_student_id: data.entryId });
+      if (rpcErr) {
+        const { error: deleteErr } = await supabaseAdmin
+          .from("students").delete().eq("id", data.entryId);
+        if (deleteErr) {
+          return { success: false, error: `Failed to delete student record: ${deleteErr.message}` };
+        }
+      }
 
       return { success: true };
     }
