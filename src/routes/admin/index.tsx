@@ -63,21 +63,22 @@ function AdminDashboard() {
 
   // Session check
   useEffect(() => {
+    const localRaw = typeof window !== "undefined" ? localStorage.getItem("utkarsh_admin_session") : null;
+    if (localRaw) {
+      try {
+        const parsed = JSON.parse(localRaw);
+        if (parsed.access_token) {
+          setToken(parsed.access_token);
+          return;
+        }
+      } catch { /* ignore */ }
+    }
+
     supabase.auth.getSession().then((result: { data: { session: { access_token: string } | null } | null }) => {
       const session = result.data?.session;
       if (session?.access_token) {
         setToken(session.access_token);
         return;
-      }
-      const localRaw = typeof window !== "undefined" ? localStorage.getItem("utkarsh_admin_session") : null;
-      if (localRaw) {
-        try {
-          const parsed = JSON.parse(localRaw);
-          if (parsed.access_token) {
-            setToken(parsed.access_token);
-            return;
-          }
-        } catch { /* ignore */ }
       }
       navigate({ to: "/admin-login" });
     });
