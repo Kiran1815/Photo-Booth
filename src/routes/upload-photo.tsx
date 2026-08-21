@@ -64,6 +64,15 @@ function UploadPhotoPage() {
     [handleFile]
   );
 
+  const readFileAsDataUrl = (f: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(f);
+    });
+  };
+
   const handleSubmit = async () => {
     if (!file || !studentId) {
       setError("Session expired or missing registration details. Please register again.");
@@ -75,7 +84,10 @@ function UploadPhotoPage() {
     setError(null);
 
     try {
-      // 1. Generate unique ticket number atomically from Supabase RPC / local sequence
+      // 1. Read file as Data URL for guaranteed display fallback
+      const dataUrl = await readFileAsDataUrl(file);
+
+      // 2. Generate unique ticket number atomically from Supabase RPC / local sequence
       let ticketNum = "";
       try {
         const { data: rpcTicket } = await supabase.rpc("generate_ticket_number");
@@ -87,32 +99,31 @@ function UploadPhotoPage() {
         ticketNum = localStore.getNextTicketNumber();
       }
 
-      // 2. Prepare file path in bucket "contest-photos"
-      const ext = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
-      const storageFilePath = `${ticketNum}_${Date.now()}.${ext}`;
+      let savedPhotoPath = dataUrl;
 
-      // 3. Upload photo file directly to Supabase Storage bucket "contest-photos"
-      const { data: storageResult, error: uploadErr } = await supabase.storage
-        .from("contest-photos")
-        .upload(storageFilePath, file, {
-          contentType: file.type || "image/jpeg",
-          upsert: false,
-        });
+      // 3. Optional Supabase storage attempt if configured
+      try {
+        const ext = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+        const storageFilePath = `${ticketNum}_${Date.now()}.${ext}`;
 
-      if (uploadErr) {
-        console.error("Storage upload error:", uploadErr);
-        throw new Error(`Photo upload failed: ${uploadErr.message}`);
+        const { data: storageResult, error: uploadErr } = await supabase.storage
+          .from("contest-photos")
+          .upload(storageFilePath, file, {
+            contentType: file.type || "image/jpeg",
+            upsert: false,
+          });
+
+        if (!uploadErr && storageResult?.path) {
+          const pubUrl = supabase.storage.from("contest-photos").getPublicUrl(storageResult.path).data?.publicUrl;
+          if (pubUrl && !pubUrl.includes("ddbxwyxgyjlpthenvbzc") && !pubUrl.includes("YOUR_PROJECT_ID")) {
+            savedPhotoPath = pubUrl;
+          }
+        }
+      } catch (storageErr) {
+        console.warn("Storage upload fallback to Data URL:", storageErr);
       }
 
-      if (!storageResult?.path) {
-        throw new Error("Photo upload failed: No storage path returned from Supabase.");
-      }
-
-      // Store the storage object path in the DB. Build the public URL later
-      // from the Bucket + path in the admin/gallery/profile queries.
-      const savedPhotoPath = storageResult.path;
-
-      // 4. Update student record in public.students table ONLY after successful photo upload
+      // 4. Update student record with photo path (Data URL or storage URL)
       const res = await createEntry({
         data: {
           student_id:    studentId,

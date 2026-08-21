@@ -40,6 +40,12 @@ function storagePathFromUrl(url: string | null): string | null {
   return null;
 }
 
+function normalizeStoragePath(url: string | null): string | null {
+  const storagePath = storagePathFromUrl(url) ?? url;
+  if (!storagePath) return null;
+  return storagePath.replace(/^\/+/, "");
+}
+
 // ── Public Functions ──────────────────────────────────
 
 /** Register a new student in public.students */
@@ -426,12 +432,18 @@ export const adminGetEntries = createServerFn({ method: "POST" })
       const { data: rows, error, count } = await (query as any);
       if (error) return { success: false, error: error.message };
 
-      const items = (rows ?? []).map((s: any) => {
+      const items = await Promise.all((rows ?? []).map(async (s: any) => {
         let photo_url: string | null = s.photo_path ?? null;
-        // Normalize stored path: if a full public URL was stored, extract the object path.
-        const storagePath = storagePathFromUrl(s.photo_path) ?? s.photo_path;
+        const storagePath = normalizeStoragePath(s.photo_path);
+
         if (storagePath && !storagePath.startsWith("http") && !storagePath.startsWith("data:")) {
-          photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(storagePath).data?.publicUrl ?? photo_url;
+          const { data: signedData, error: signedError } = await supabaseAdmin
+            .storage.from("contest-photos").createSignedUrl(storagePath, 60 * 60);
+          if (signedData?.signedUrl) {
+            photo_url = signedData.signedUrl;
+          } else {
+            photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(storagePath).data?.publicUrl ?? photo_url;
+          }
         }
 
         const displayStatus = s.status === "disqualified" ? "rejected"
@@ -454,7 +466,7 @@ export const adminGetEntries = createServerFn({ method: "POST" })
             contact_number:  s.contact_number,
           },
         };
-      });
+      }));
 
       return { success: true, entries: items, total: count ?? 0 };
     }
@@ -534,9 +546,15 @@ export const adminDeleteEntry = createServerFn({ method: "POST" })
 
       // 2. Delete storage object if a photo exists
       if (student?.photo_path) {
-        const storagePath = storagePathFromUrl(student.photo_path) ?? student.photo_path;
-        const { error: storageErr } = await supabaseAdmin.storage
-          .from("contest-photos").remove([storagePath]);
+        const storagePath = normalizeStoragePath(student.photo_path);
+        if (storagePath) {
+          const { error: storageErr } = await supabaseAdmin.storage
+            .from("contest-photos").remove([storagePath]);
+          if (storageErr) {
+            console.error("Storage delete error:", storageErr);
+            return { success: false, error: `Failed to delete storage photo: ${storageErr.message}` };
+          }
+        }
         if (storageErr) {
           console.error("Storage delete error:", storageErr);
           return { success: false, error: `Failed to delete storage photo: ${storageErr.message}` };
@@ -608,9 +626,10 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
       const ticketNum = chosen.ticket_id
         ?? `UTKARSH2026-${String(chosen.ticket_number ?? 1).padStart(4, "0")}`;
 
+      const normalizedPhotoPath = normalizeStoragePath(chosen.photo_path);
       let photo_url = chosen.photo_path ?? "";
-      if (photo_url && !photo_url.startsWith("http")) {
-        photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(photo_url).data?.publicUrl ?? photo_url;
+      if (normalizedPhotoPath && !normalizedPhotoPath.startsWith("http") && !normalizedPhotoPath.startsWith("data:")) {
+        photo_url = supabaseAdmin.storage.from("contest-photos").getPublicUrl(normalizedPhotoPath).data?.publicUrl ?? photo_url;
       }
 
       // Persist winner to Supabase winners table with draw_number

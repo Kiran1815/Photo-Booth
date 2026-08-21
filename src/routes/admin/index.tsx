@@ -47,9 +47,23 @@ function AdminDashboard() {
 
   // Session check
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) { navigate({ to: "/admin-login" }); return; }
-      setToken(data.session.access_token);
+    supabase.auth.getSession().then((result: { data: { session: { access_token: string } | null } | null }) => {
+      const session = result.data?.session;
+      if (session?.access_token) {
+        setToken(session.access_token);
+        return;
+      }
+      const localRaw = typeof window !== "undefined" ? localStorage.getItem("utkarsh_admin_session") : null;
+      if (localRaw) {
+        try {
+          const parsed = JSON.parse(localRaw);
+          if (parsed.access_token) {
+            setToken(parsed.access_token);
+            return;
+          }
+        } catch { /* ignore */ }
+      }
+      navigate({ to: "/admin-login" });
     });
   }, [navigate]);
 
@@ -75,6 +89,9 @@ function AdminDashboard() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("utkarsh_admin_session");
+    }
     navigate({ to: "/admin-login" });
   };
 
@@ -108,6 +125,19 @@ function AdminDashboard() {
   // ── Lucky Draw ──
   const startDrawFlow = (drawNum: number) => { setSelectedDrawNumber(drawNum); setDrawState("confirm"); };
 
+  const getEntryPhotoUrl = (entry: any) => {
+    const raw = entry.photo_url || entry.photo_path;
+    if (!raw) return null;
+    if (raw.startsWith("http") || raw.startsWith("data:")) return raw;
+    try {
+      const pubUrl = supabase.storage.from("contest-photos").getPublicUrl(raw).data?.publicUrl;
+      if (pubUrl && !pubUrl.includes("ddbxwyxgyjlpthenvbzc") && !pubUrl.includes("YOUR_PROJECT_ID")) {
+        return pubUrl;
+      }
+    } catch { /* ignore */ }
+    return raw;
+  };
+
   const executeDraw = async () => {
     if (!token) return;
     setDrawState("counting");
@@ -126,8 +156,8 @@ function AdminDashboard() {
 
     // Collect photos from current entries for the shuffle animation
     const entryPhotos = entries
-      .filter((e) => e.photo_url || e.photo_path)
-      .map((e) => e.photo_url || e.photo_path);
+      .map(getEntryPhotoUrl)
+      .filter(Boolean) as string[];
 
     // Shuffle animation: cycle through ticket numbers AND photos
     let photoIdx = 0;
@@ -262,7 +292,7 @@ function AdminDashboard() {
             {entries.length > 0 && (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                 {entries.map((e: any) => {
-                  const photoSrc = e.photo_url || e.photo_path;
+                  const photoSrc = getEntryPhotoUrl(e);
                   return (
                     <div key={e.id} className="group relative rounded-2xl overflow-hidden border border-border/50 bg-secondary/20">
                       {photoSrc ? (
@@ -316,7 +346,7 @@ function AdminDashboard() {
                 </thead>
                 <tbody className="divide-y divide-border/30">
                   {entries.map((e: any) => {
-                    const photoSrc = e.photo_url || e.photo_path;
+                    const photoSrc = getEntryPhotoUrl(e);
                     return (
                       <tr key={e.id} className="hover:bg-secondary/30 transition-colors">
                         <td className="px-4 py-3">

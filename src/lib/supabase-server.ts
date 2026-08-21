@@ -22,16 +22,25 @@ const supabaseKey =
   process.env.SUPABASE_PUBLISHABLE_KEY ||
   DEFAULT_SUPABASE_ANON_KEY;
 
-export const isSupabaseConfigured = true;
+const isPlaceholderUrl =
+  !supabaseUrl ||
+  supabaseUrl.includes("ddbxwyxgyjlpthenvbzc") ||
+  supabaseUrl.includes("YOUR_PROJECT_ID");
+
+export const isSupabaseConfigured =
+  Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) && !isPlaceholderUrl;
 
 let client: any = null;
 
-try {
-  client = createClient<Database>(supabaseUrl, supabaseKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-} catch (err) {
-  console.warn("Failed to initialize Supabase server client:", err);
+if (isSupabaseConfigured) {
+  try {
+    client = createClient<Database>(supabaseUrl, supabaseKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+  } catch (err) {
+    console.warn("Failed to initialize Supabase server client:", err);
+  }
 }
 
 export const supabaseAdmin = client;
+
