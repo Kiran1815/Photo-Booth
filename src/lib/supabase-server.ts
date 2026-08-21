@@ -24,11 +24,9 @@ const supabaseKey =
 
 const isPlaceholderUrl =
   !supabaseUrl ||
-  supabaseUrl.includes("ddbxwyxgyjlpthenvbzc") ||
   supabaseUrl.includes("YOUR_PROJECT_ID");
 
-export const isSupabaseConfigured =
-  Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) && !isPlaceholderUrl;
+export const isSupabaseConfigured = !isPlaceholderUrl;
 
 let client: any = null;
 

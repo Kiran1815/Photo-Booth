@@ -115,7 +115,7 @@ function UploadPhotoPage() {
 
         if (!uploadErr && storageResult?.path) {
           const pubUrl = supabase.storage.from("contest-photos").getPublicUrl(storageResult.path).data?.publicUrl;
-          if (pubUrl && !pubUrl.includes("ddbxwyxgyjlpthenvbzc") && !pubUrl.includes("YOUR_PROJECT_ID")) {
+          if (pubUrl && !pubUrl.includes("YOUR_PROJECT_ID")) {
             savedPhotoPath = pubUrl;
           }
         }

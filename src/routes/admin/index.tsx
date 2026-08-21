@@ -131,7 +131,7 @@ function AdminDashboard() {
     if (raw.startsWith("http") || raw.startsWith("data:")) return raw;
     try {
       const pubUrl = supabase.storage.from("contest-photos").getPublicUrl(raw).data?.publicUrl;
-      if (pubUrl && !pubUrl.includes("ddbxwyxgyjlpthenvbzc") && !pubUrl.includes("YOUR_PROJECT_ID")) {
+      if (pubUrl && !pubUrl.includes("YOUR_PROJECT_ID")) {
         return pubUrl;
       }
     } catch { /* ignore */ }

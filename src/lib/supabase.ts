@@ -26,7 +26,6 @@ const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ||
 
 const isPlaceholderUrl =
   !supabaseUrl ||
-  supabaseUrl.includes("ddbxwyxgyjlpthenvbzc") ||
   supabaseUrl.includes("YOUR_PROJECT_ID");
 
 let realClient: any = null;
