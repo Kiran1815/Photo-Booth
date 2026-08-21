@@ -745,14 +745,17 @@ function resolveWinnerObject(student: any, drawNumber: number, supabaseAdmin: an
     photo_url = getAvatarFallback(student.full_name, ticketNum);
   }
   return {
-    student_id:    student.id,
-    ticket_number: ticketNum,
-    display_name:  student.full_name,
-    college_name:  student.college_name,
+    student_id:      student.id,
+    ticket_number:   ticketNum,
+    display_name:    student.full_name,
+    college_name:    student.college_name,
+    register_number: student.register_number ?? "",
+    contact_number:  student.contact_number ?? "",
+    email:           student.college_email ?? student.email ?? "",
     photo_url,
-    photo_path:    photo_url,
-    selected_at:   new Date().toISOString(),
-    draw_number:   drawNumber,
+    photo_path:      photo_url,
+    selected_at:     new Date().toISOString(),
+    draw_number:     drawNumber,
   };
 }
 
@@ -854,27 +857,24 @@ export const adminExecuteDraw = createServerFn({ method: "POST" })
         const tp1Student = allStudentsList.find((s: any) => matchesTestParticipant(s, TEST_PARTICIPANT_1));
         const tp2Student = allStudentsList.find((s: any) => matchesTestParticipant(s, TEST_PARTICIPANT_2));
 
-        const isTp1Available = tp1Student && !excludeIds.has(tp1Student.id);
-        const isTp2Available = tp2Student && !excludeIds.has(tp2Student.id);
+        const isTp1Available = !!(tp1Student && !excludeIds.has(tp1Student.id));
+        const isTp2Available = !!(tp2Student && !excludeIds.has(tp2Student.id));
 
-        if (drawNumber === 1) {
-          if (isTp1Available) {
-            chosenStudent = tp1Student;
-          } else if (isTp2Available) {
-            chosenStudent = tp2Student;
-          } else {
-            // Neither registered -> fair random draw
-            chosenStudent = remainingPool[Math.floor(Math.random() * remainingPool.length)];
-          }
-        } else if (drawNumber === 2) {
-          if (isTp2Available) {
-            chosenStudent = tp2Student;
-          } else if (isTp1Available) {
-            chosenStudent = tp1Student;
-          } else {
-            // Fair random fallback from remaining participants
-            chosenStudent = remainingPool[Math.floor(Math.random() * remainingPool.length)];
-          }
+        if (isTp1Available && isTp2Available) {
+          // Both registered and available (neither was selected in a prior draw).
+          // Randomly pick one for this draw; the excludeIds passed by the frontend
+          // for the second draw will ensure the other one is picked then.
+          const pickTp1 = Math.random() < 0.5;
+          chosenStudent = pickTp1 ? tp1Student : tp2Student;
+        } else if (isTp1Available) {
+          // TP2 was already excluded (won the other draw) or not registered
+          chosenStudent = tp1Student;
+        } else if (isTp2Available) {
+          // TP1 was already excluded (won the other draw) or not registered
+          chosenStudent = tp2Student;
+        } else {
+          // Neither available → fair random draw
+          chosenStudent = remainingPool[Math.floor(Math.random() * remainingPool.length)];
         }
       }
 

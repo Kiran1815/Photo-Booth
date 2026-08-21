@@ -494,6 +494,7 @@ function AdminDashboard() {
                     <th className="px-4 py-3 text-left">Student</th>
                     <th className="px-4 py-3 text-left hidden md:table-cell">College</th>
                     <th className="px-4 py-3 text-left hidden lg:table-cell">Reg No.</th>
+                    <th className="px-4 py-3 text-left hidden lg:table-cell">Phone</th>
                     <th className="px-4 py-3 text-left">Status</th>
                     <th className="px-4 py-3 text-left">Actions</th>
                   </tr>
@@ -521,13 +522,16 @@ function AdminDashboard() {
                         <td className="px-4 py-3 font-mono text-[12px] text-neon-pink">{e.ticket_number}</td>
                         <td className="px-4 py-3">
                           <p className="font-semibold">{e.students?.full_name || e.display_name}</p>
-                          <p className="text-[11px] text-muted-foreground">{e.students?.college_email}</p>
+                          <p className="text-[11px] text-muted-foreground">{e.students?.college_email || e.email}</p>
                         </td>
                         <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-[12px]">
                           {e.students?.college_name || e.college_name}
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-[12px]">
                           {e.students?.register_number || e.register_number}
+                        </td>
+                        <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-[12px]">
+                          {e.students?.contact_number || e.contact_number || "—"}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
@@ -546,12 +550,6 @@ function AdminDashboard() {
                               <button onClick={() => handleEntryStatus(e.id, "valid")}
                                 className="rounded-lg border border-green-500/40 px-2.5 py-1 text-[11px] text-green-400 hover:bg-green-500/10 transition-colors">
                                 ✓ Approve
-                              </button>
-                            )}
-                            {e.status !== "rejected" && (
-                              <button onClick={() => handleEntryStatus(e.id, "rejected")}
-                                className="rounded-lg border border-destructive/40 px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/10 transition-colors">
-                                ✕ Reject
                               </button>
                             )}
                             <button onClick={() => setDeleteConfirm(e.id)}
@@ -777,6 +775,17 @@ function AdminDashboard() {
                   <p className="font-mono text-2xl font-black text-neon-gold tracking-wider">{winner.ticket_number}</p>
                   <h3 className="mt-1 text-lg font-bold text-foreground">{winner.display_name}</h3>
                   <p className="text-xs text-muted-foreground">{winner.college_name}</p>
+                  <div className="mt-3 space-y-1 text-center">
+                    {winner.register_number && (
+                      <p className="text-[11px] text-muted-foreground">Reg: <span className="text-foreground font-mono">{winner.register_number}</span></p>
+                    )}
+                    {winner.contact_number && (
+                      <p className="text-[11px] text-muted-foreground">Phone: <span className="text-foreground font-semibold">{winner.contact_number}</span></p>
+                    )}
+                    {winner.email && (
+                      <p className="text-[11px] text-muted-foreground">Email: <span className="text-foreground">{winner.email}</span></p>
+                    )}
+                  </div>
                   <p className="mt-3 text-[11px] text-muted-foreground">
                     Total entries eligible: {winner.total_entries}
                   </p>
@@ -858,6 +867,11 @@ function AdminDashboard() {
                         <p className="font-mono text-2xl font-black text-neon-gold tracking-wider">{winner1.ticket_number}</p>
                         <h3 className="mt-1 text-lg font-bold text-foreground">{winner1.display_name}</h3>
                         <p className="text-xs text-muted-foreground">{winner1.college_name}</p>
+                        <div className="mt-2 space-y-0.5 text-center">
+                          {winner1.register_number && <p className="text-[11px] text-muted-foreground">Reg: <span className="text-foreground font-mono">{winner1.register_number}</span></p>}
+                          {winner1.contact_number && <p className="text-[11px] text-muted-foreground">Phone: <span className="text-foreground font-semibold">{winner1.contact_number}</span></p>}
+                          {winner1.email && <p className="text-[11px] text-muted-foreground">Email: <span className="text-foreground">{winner1.email}</span></p>}
+                        </div>
                       </div>
 
                       {/* Winner 2 Card */}
@@ -878,6 +892,11 @@ function AdminDashboard() {
                         <p className="font-mono text-2xl font-black text-cyan-400 tracking-wider">{winner2.ticket_number}</p>
                         <h3 className="mt-1 text-lg font-bold text-foreground">{winner2.display_name}</h3>
                         <p className="text-xs text-muted-foreground">{winner2.college_name}</p>
+                        <div className="mt-2 space-y-0.5 text-center">
+                          {winner2.register_number && <p className="text-[11px] text-muted-foreground">Reg: <span className="text-foreground font-mono">{winner2.register_number}</span></p>}
+                          {winner2.contact_number && <p className="text-[11px] text-muted-foreground">Phone: <span className="text-foreground font-semibold">{winner2.contact_number}</span></p>}
+                          {winner2.email && <p className="text-[11px] text-muted-foreground">Email: <span className="text-foreground">{winner2.email}</span></p>}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -904,6 +923,11 @@ function AdminDashboard() {
                       <p className="font-mono text-xl font-black text-neon-gold tracking-wider">{winner1.ticket_number}</p>
                       <h3 className="mt-1 text-base font-bold text-foreground">{winner1.display_name}</h3>
                       <p className="text-xs text-muted-foreground">{winner1.college_name}</p>
+                      <div className="mt-2 space-y-0.5 text-center">
+                        {winner1.register_number && <p className="text-[11px] text-muted-foreground">Reg: <span className="text-foreground font-mono">{winner1.register_number}</span></p>}
+                        {winner1.contact_number && <p className="text-[11px] text-muted-foreground">Phone: <span className="text-foreground font-semibold">{winner1.contact_number}</span></p>}
+                        {winner1.email && <p className="text-[11px] text-muted-foreground">Email: <span className="text-foreground">{winner1.email}</span></p>}
+                      </div>
                     </div>
 
                     {/* Draw 2 Action Card */}
@@ -961,6 +985,11 @@ function AdminDashboard() {
                       <p className="font-mono text-xl font-black text-cyan-400 tracking-wider">{winner2.ticket_number}</p>
                       <h3 className="mt-1 text-base font-bold text-foreground">{winner2.display_name}</h3>
                       <p className="text-xs text-muted-foreground">{winner2.college_name}</p>
+                      <div className="mt-2 space-y-0.5 text-center">
+                        {winner2.register_number && <p className="text-[11px] text-muted-foreground">Reg: <span className="text-foreground font-mono">{winner2.register_number}</span></p>}
+                        {winner2.contact_number && <p className="text-[11px] text-muted-foreground">Phone: <span className="text-foreground font-semibold">{winner2.contact_number}</span></p>}
+                        {winner2.email && <p className="text-[11px] text-muted-foreground">Email: <span className="text-foreground">{winner2.email}</span></p>}
+                      </div>
                     </div>
                   </div>
                 )}
